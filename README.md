@@ -32,10 +32,11 @@ Install x11-utils:
 sudo apt-get install x11-utils
 ```
 
-Configure ffmpeg to use x11grab and libx264:
-```bash
-sudo ./configure --enable-x11grab --enable-libx264
-```
+> [!NOTE]
+> Configure ffmpeg to use x11grab and libx264:
+> ```bash
+> sudo ./configure --enable-x11grab --enable-libx264
+> ```
 
 ## Installation
 
@@ -137,6 +138,10 @@ sudo i2cdetect -y 1  # Try bus 1
 ```
 
 3. **Install Python dependencies**:
+
+> [!TIP]
+> **Recommended installation method**: Install to user directory to avoid system package conflicts.
+
 ```bash
 cd x11stream
 # Option 1: Install to user directory (recommended)
@@ -189,31 +194,38 @@ The OLED display shows:
 
 ### I2C Auto-Check Feature
 
-The script automatically performs I2C diagnostics on startup:
-- **Checks for I2C device nodes**: Verifies `/dev/i2c-*` devices exist
-- **Scans I2C buses**: Uses `i2cdetect` to find SSD1306 display at 0x3C or 0x3D
-- **Provides helpful errors**: Clear guidance if I2C is not configured
-
-Example auto-check output:
-```
-Performing I2C auto-check...
-✓ Found I2C device nodes: /dev/i2c-0, /dev/i2c-1
-✓ I2C device detected on bus 0 at address 0x3C or 0x3D
-```
+> [!NOTE]
+> The script automatically performs I2C diagnostics on startup:
+> - **Checks for I2C device nodes**: Verifies `/dev/i2c-*` devices exist
+> - **Scans I2C buses**: Uses `i2cdetect` to find SSD1306 display at 0x3C or 0x3D
+> - **Provides helpful errors**: Clear guidance if I2C is not configured
+>
+> Example auto-check output:
+> ```
+> Performing I2C auto-check...
+> ✓ Found I2C device nodes: /dev/i2c-0, /dev/i2c-1
+> ✓ I2C device detected on bus 0 at address 0x3C or 0x3D
+> ```
 
 ### Troubleshooting OLED Display
 
 **Display not working:**
-- Verify I2C is enabled: `sudo i2cdetect -y 0` or `sudo i2cdetect -y 1`
-- Check if device appears at address 0x3C
-- Verify wiring connections (SDA, SCL, VCC, GND)
-- Check service logs: `sudo journalctl -u oled_display.service -f`
+
+> [!TIP]
+> Troubleshooting checklist:
+> - Verify I2C is enabled: `sudo i2cdetect -y 0` or `sudo i2cdetect -y 1`
+> - Check if device appears at address 0x3C
+> - Verify wiring connections (SDA, SCL, VCC, GND)
+> - Check service logs: `sudo journalctl -u oled_display.service -f`
 
 **Wrong I2C bus:**
-- If you're using a different I2C bus, you may need to modify the Python script
-- The script uses `board.SCL` and `board.SDA`, which are the default I2C pins defined by the board library (they do not auto-detect alternate buses or pins)
-- For manual configuration, check which I2C bus your display is on with `i2cdetect`
-- You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
+
+> [!IMPORTANT]
+> The script uses `board.SCL` and `board.SDA`, which are the default I2C pins defined by the board library. They do not auto-detect alternate buses or pins.
+>
+> - If you're using a different I2C bus, you may need to modify the Python script
+> - For manual configuration, check which I2C bus your display is on with `i2cdetect`
+> - You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
 
 ## Configuration
 
@@ -236,10 +248,11 @@ The following environment variables can be set to customize the stream:
 
 ### Resolution Auto-Detection
 
-The script automatically detects your display resolution using `xdpyinfo`:
-- If detected resolution is **higher** than the target: captures full screen and scales down to target
-- If detected resolution is **lower** than the target: uses the native (lower) resolution
-- If resolution cannot be detected: uses the configured target resolution
+> [!NOTE]
+> The script automatically detects your display resolution using `xdpyinfo`:
+> - If detected resolution is **higher** than the target: captures full screen and scales down to target
+> - If detected resolution is **lower** than the target: uses the native (lower) resolution
+> - If resolution cannot be detected: uses the configured target resolution
 
 ### Audio Quality Presets
 
@@ -291,20 +304,30 @@ Or edit `/etc/systemd/system/x11stream.service` directly.
 ## Troubleshooting
 
 ### "Display not found" error
-Ensure X11 is running and the `DISPLAY` variable is set correctly. On systems with multiple displays, try `:1.0` or `:0.1`.
+
+> [!WARNING]
+> Ensure X11 is running and the `DISPLAY` variable is set correctly. On systems with multiple displays, try `:1.0` or `:0.1`.
 
 ### "Permission denied" error
-The user running the script needs access to the X11 display. Run with appropriate permissions or add the user to the video group.
+
+> [!WARNING]
+> The user running the script needs access to the X11 display. Run with appropriate permissions or add the user to the video group.
 
 ### Stream not accessible
-- Check if ffmpeg is running: `ps aux | grep ffmpeg`
-- Ensure the port is not blocked by firewall: `sudo ufw allow 8080/tcp`
-- Verify the IP address and port in the startup output
+
+> [!TIP]
+> Common solutions:
+> - Check if ffmpeg is running: `ps aux | grep ffmpeg`
+> - Ensure the port is not blocked by firewall: `sudo ufw allow 8080/tcp`
+> - Verify the IP address and port in the startup output
 
 ### Audio not working
-- Ensure PulseAudio or ALSA is running
-- Check audio source: `pactl list short sources` (PulseAudio)
-- Try different audio source in interactive mode
+
+> [!TIP]
+> Troubleshooting steps:
+> - Ensure PulseAudio or ALSA is running
+> - Check audio source: `pactl list short sources` (PulseAudio)
+> - Try different audio source in interactive mode
 
 ## License
 
