@@ -117,9 +117,15 @@ The x11stream project supports displaying the local IP address and streaming sta
 # Install I2C tools
 sudo apt-get install -y i2c-tools python3-pip
 
-# Enable I2C (if not already enabled)
-# For Orange Pi, you may need to modify /boot/orangepiEnv.txt or use armbian-config
-# sudo armbian-config -> System -> Hardware -> enable i2c0 or i2c1
+# Enable I2C using armbian-config (recommended method for Armbian-based systems)
+sudo armbian-config
+# Navigate to: System -> Hardware -> enable i2c0 or i2c1
+# Save and reboot
+
+# Alternative: For manual configuration, you can edit /boot/orangepiEnv.txt
+# Add or uncomment the following line:
+# overlays=i2c0
+# Then reboot the system
 ```
 
 2. **Verify I2C connection**:

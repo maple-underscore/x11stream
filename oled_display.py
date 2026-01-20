@@ -8,10 +8,25 @@ Connected via I2C (I2C_SDA_M0 and I2C_SCL_M0 pins)
 import time
 import sys
 import subprocess
-from board import SCL, SDA
-import busio
+
+# Import board library for I2C pin definitions
+try:
+    from board import SCL, SDA
+    import busio
+except (ImportError, NotImplementedError) as e:
+    print(f"Error: CircuitPython board library not available: {e}", file=sys.stderr)
+    print("Please install: sudo pip3 install adafruit-blinka", file=sys.stderr)
+    sys.exit(1)
+
 from PIL import Image, ImageDraw, ImageFont
-import adafruit_ssd1306
+
+# Import Adafruit SSD1306 library
+try:
+    import adafruit_ssd1306
+except ImportError as e:
+    print(f"Error: Adafruit SSD1306 library not available: {e}", file=sys.stderr)
+    print("Please install: sudo pip3 install adafruit-circuitpython-ssd1306", file=sys.stderr)
+    sys.exit(1)
 
 # Display dimensions
 WIDTH = 128
@@ -21,9 +36,20 @@ HEIGHT = 64
 I2C_ADDRESS = 0x3C
 
 def get_local_ip():
-    """Get the local IP address of the machine."""
+    """Get the local IP address of the machine.
+    
+    Uses the same approach as x11stream.sh:
+    1. First tries 'ip route get 1' which queries the routing table for the
+       primary interface used to reach 1.0.0.0 (a public IP). This reliably
+       finds the IP address of the interface with the default route.
+    2. Falls back to 'hostname -I' if the first method fails.
+    
+    Returns:
+        str: The local IP address, or "No IP" if not found.
+    """
     try:
         # Try using ip route first (same as in x11stream.sh)
+        # This queries which interface would be used to reach 1.0.0.0
         result = subprocess.run(
             ["ip", "route", "get", "1"],
             capture_output=True,
@@ -52,13 +78,17 @@ def get_local_ip():
             ips = result.stdout.strip().split()
             if ips:
                 return ips[0]
-    except Exception as e:
+    except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
         print(f"Error getting IP address: {e}", file=sys.stderr)
     
     return "No IP"
 
 def get_stream_status():
-    """Check if the x11stream service is running."""
+    """Check if the x11stream service is running.
+    
+    Returns:
+        str: "Streaming" if active, "Stopped" if inactive, "Unknown" if can't determine.
+    """
     try:
         result = subprocess.run(
             ["systemctl", "is-active", "x11stream.service"],
@@ -70,7 +100,7 @@ def get_stream_status():
             return "Streaming"
         else:
             return "Stopped"
-    except Exception:
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
         # If systemctl is not available, check for ffmpeg process
         try:
             result = subprocess.run(
@@ -81,7 +111,7 @@ def get_stream_status():
             )
             if result.returncode == 0:
                 return "Streaming"
-        except Exception:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             pass
     
     return "Unknown"
