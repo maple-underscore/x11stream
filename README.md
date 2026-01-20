@@ -222,10 +222,10 @@ The OLED display shows:
 
 > [!IMPORTANT]
 > The script uses `board.SCL` and `board.SDA`, which are the default I2C pins defined by the board library. They do not auto-detect alternate buses or pins.
-
-- If you're using a different I2C bus, you may need to modify the Python script
-- For manual configuration, check which I2C bus your display is on with `i2cdetect`
-- You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
+>
+> - If you're using a different I2C bus, you may need to modify the Python script
+> - For manual configuration, check which I2C bus your display is on with `i2cdetect`
+> - You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
 
 ## Configuration
 
