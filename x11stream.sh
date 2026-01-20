@@ -34,7 +34,7 @@ set -e
 
 # Default configuration
 DISPLAY_NUM="${DISPLAY:-:0.0}"
-RESOLUTION="${RESOLUTION:-1920x1080}"
+TARGET_RESOLUTION="${RESOLUTION:-1920x1080}"
 FRAMERATE="${FRAMERATE:-60}"
 VIDEO_BITRATE="${BITRATE:-6M}"
 HTTP_PORT="${HTTP_PORT:-8080}"
@@ -62,7 +62,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Environment variables (non-interactive mode):"
             echo "  DISPLAY          X11 display (default: :0.0)"
-            echo "  RESOLUTION       Video resolution (default: 1920x1080)"
+            echo "  RESOLUTION       Target video resolution (default: 1920x1080)"
+            echo "                   Auto-detects display resolution and scales down if needed"
             echo "  FRAMERATE        Frames per second (default: 60)"
             echo "  BITRATE          Video bitrate (default: 6M)"
             echo "  HTTP_PORT        HTTP server port (default: 8080)"
@@ -92,6 +93,85 @@ if [ -z "$IP_ADDRESS" ]; then
     echo "Please ensure that 'ip route' or 'hostname -I' is available, or set IP_ADDRESS manually." >&2
     exit 1
 fi
+
+# Detect display resolution using xdpyinfo
+# Returns resolution in WIDTHxHEIGHT format (e.g., 1920x1080)
+get_display_resolution() {
+    local display="$1"
+    local resolution
+    resolution=$(xdpyinfo -display "$display" 2>/dev/null | grep 'dimensions:' | awk '{print $2}' | head -1)
+    # Validate that the resolution matches WIDTHxHEIGHT format
+    if [[ "$resolution" =~ ^[0-9]+x[0-9]+$ ]]; then
+        echo "$resolution"
+    else
+        echo ""
+    fi
+}
+
+# Parse resolution string into width and height
+# Usage: parse_resolution "1920x1080" -> prints "1920 1080"
+# Returns empty string if format is invalid
+parse_resolution() {
+    local res="$1"
+    if [[ "$res" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+    else
+        echo ""
+    fi
+}
+
+# Compare resolutions and determine output resolution and scaling needs
+# Returns: CAPTURE_RESOLUTION (what to capture) and SCALE_FILTER (ffmpeg filter if needed)
+determine_resolution() {
+    local detected_res="$1"
+    local target_res="$2"
+    
+    if [ -z "$detected_res" ]; then
+        echo "Warning: Could not detect display resolution, using target resolution: $target_res" >&2
+        CAPTURE_RESOLUTION="$target_res"
+        SCALE_FILTER=""
+        OUTPUT_RESOLUTION="$target_res"
+        return
+    fi
+    
+    # Parse detected resolution
+    local detected_parsed target_parsed
+    detected_parsed=$(parse_resolution "$detected_res")
+    target_parsed=$(parse_resolution "$target_res")
+    
+    # Validate parsed resolutions
+    if [ -z "$detected_parsed" ] || [ -z "$target_parsed" ]; then
+        echo "Warning: Invalid resolution format, using target resolution: $target_res" >&2
+        CAPTURE_RESOLUTION="$target_res"
+        SCALE_FILTER=""
+        OUTPUT_RESOLUTION="$target_res"
+        return
+    fi
+    
+    read -r detected_width detected_height <<< "$detected_parsed"
+    read -r target_width target_height <<< "$target_parsed"
+    
+    # Calculate pixel counts for comparison
+    local detected_pixels=$((detected_width * detected_height))
+    local target_pixels=$((target_width * target_height))
+    
+    if [ "$detected_pixels" -gt "$target_pixels" ]; then
+        # Detected resolution is higher than target - capture full and scale down
+        CAPTURE_RESOLUTION="$detected_res"
+        SCALE_FILTER="-vf scale=${target_width}:${target_height}"
+        OUTPUT_RESOLUTION="$target_res"
+        echo "Detected resolution ($detected_res) is higher than target ($target_res), will scale down" >&2
+    else
+        # Detected resolution is lower or equal - use detected resolution
+        CAPTURE_RESOLUTION="$detected_res"
+        SCALE_FILTER=""
+        OUTPUT_RESOLUTION="$detected_res"
+        if [ "$detected_pixels" -lt "$target_pixels" ]; then
+            echo "Detected resolution ($detected_res) is lower than target ($target_res), using native resolution" >&2
+        fi
+    fi
+}
+
 
 # Calculate bandwidth estimate
 calculate_bandwidth() {
@@ -180,7 +260,7 @@ interactive_setup() {
     
     # Resolution selection
     echo ""
-    echo "Resolution Options:"
+    echo "Target Resolution Options (auto-detection will adjust if display is smaller):"
     echo "  1) 1920x1080 (Full HD)"
     echo "  2) 2560x1440 (2K/QHD)"
     echo "  3) 3840x2160 (4K/UHD)"
@@ -189,12 +269,12 @@ interactive_setup() {
     echo "  6) Custom"
     read -p "Select resolution [1-6] (default: 1): " res_choice
     case $res_choice in
-        2) RESOLUTION="2560x1440" ;;
-        3) RESOLUTION="3840x2160" ;;
-        4) RESOLUTION="1280x720" ;;
-        5) RESOLUTION="1366x768" ;;
-        6) read -p "Enter custom resolution (e.g., 1920x1080): " RESOLUTION ;;
-        *) RESOLUTION="1920x1080" ;;
+        2) TARGET_RESOLUTION="2560x1440" ;;
+        3) TARGET_RESOLUTION="3840x2160" ;;
+        4) TARGET_RESOLUTION="1280x720" ;;
+        5) TARGET_RESOLUTION="1366x768" ;;
+        6) read -p "Enter custom resolution (e.g., 1920x1080): " TARGET_RESOLUTION ;;
+        *) TARGET_RESOLUTION="1920x1080" ;;
     esac
     
     # Framerate selection
@@ -309,9 +389,21 @@ build_audio_args() {
     fi
 }
 
+# Detect display resolution and determine capture/output settings
+DETECTED_RESOLUTION=$(get_display_resolution "$DISPLAY_NUM")
+determine_resolution "$DETECTED_RESOLUTION" "$TARGET_RESOLUTION"
+
 # Display configuration
 echo "Display:     $DISPLAY_NUM"
-echo "Resolution:  $RESOLUTION"
+if [ -n "$DETECTED_RESOLUTION" ]; then
+    echo "Detected:    $DETECTED_RESOLUTION"
+fi
+echo "Target:      $TARGET_RESOLUTION"
+if [ -n "$SCALE_FILTER" ]; then
+    echo "Output:      $OUTPUT_RESOLUTION (scaled down)"
+else
+    echo "Output:      $OUTPUT_RESOLUTION"
+fi
 echo "Framerate:   $FRAMERATE fps"
 echo "Video:       $VIDEO_BITRATE"
 if [ "$AUDIO_ENABLED" = "true" ]; then
@@ -336,6 +428,13 @@ echo "============================================"
 # Build and execute ffmpeg command
 AUDIO_ARGS=$(build_audio_args)
 
+# Build scale filter argument if scaling is needed
+if [ -n "$SCALE_FILTER" ]; then
+    VIDEO_FILTER_ARGS="$SCALE_FILTER"
+else
+    VIDEO_FILTER_ARGS=""
+fi
+
 # Run ffmpeg with x11grab and output to HTTP via mpegts
 # The -listen 1 flag makes ffmpeg act as an HTTP server
 # Low-latency settings:
@@ -343,8 +442,9 @@ AUDIO_ARGS=$(build_audio_args)
 #   -analyzeduration 0: Skip analysis delay for immediate processing
 if [ "$AUDIO_ENABLED" = "true" ]; then
     exec ffmpeg -fflags nobuffer -flags low_delay -probesize 32768 -analyzeduration 0 \
-        -f x11grab -video_size "$RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
+        -f x11grab -video_size "$CAPTURE_RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
         $AUDIO_ARGS \
+        ${VIDEO_FILTER_ARGS:+$VIDEO_FILTER_ARGS} \
         -c:v libx264 -preset ultrafast -tune zerolatency \
         -x264-params "bframes=0:rc-lookahead=0:sync-lookahead=0:sliced-threads=1" \
         -g 15 -keyint_min 15 -sc_threshold 0 \
@@ -354,7 +454,8 @@ if [ "$AUDIO_ENABLED" = "true" ]; then
         -listen 1 "http://0.0.0.0:${HTTP_PORT}/stream"
 else
     exec ffmpeg -fflags nobuffer -flags low_delay -probesize 32768 -analyzeduration 0 \
-        -f x11grab -video_size "$RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
+        -f x11grab -video_size "$CAPTURE_RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
+        ${VIDEO_FILTER_ARGS:+$VIDEO_FILTER_ARGS} \
         -c:v libx264 -preset ultrafast -tune zerolatency \
         -x264-params "bframes=0:rc-lookahead=0:sync-lookahead=0:sliced-threads=1" \
         -g 15 -keyint_min 15 -sc_threshold 0 \
