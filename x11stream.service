@@ -7,7 +7,7 @@ Wants=graphical.target
 Type=simple
 Environment="DISPLAY=:0.0"
 Environment="RESOLUTION=1920x1080"
-Environment="FRAMERATE=30"
+Environment="FRAMERATE=60"
 Environment="BITRATE=6M"
 Environment="HTTP_PORT=8080"
 ExecStart=/usr/local/bin/x11stream.sh
