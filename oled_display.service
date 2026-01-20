@@ -1,6 +1,6 @@
 [Unit]
 Description=OLED Display Status
-After=network.target x11stream.service
+After=network.target
 Wants=x11stream.service
 
 [Service]

@@ -114,7 +114,7 @@ The x11stream project supports displaying the local IP address and streaming sta
 
 1. **Enable I2C on Orange Pi**:
 ```bash
-# Install I2C tools
+# Install I2C tools and Python package manager
 sudo apt-get install -y i2c-tools python3-pip
 
 # Enable I2C using armbian-config (recommended method for Armbian-based systems)
@@ -139,7 +139,16 @@ sudo i2cdetect -y 1  # Try bus 1
 3. **Install Python dependencies**:
 ```bash
 cd x11stream
-sudo pip3 install -r requirements.txt
+# Option 1: Install to user directory (recommended)
+pip3 install --user -r requirements.txt
+
+# Option 2: Install system-wide (requires sudo, may conflict with system packages)
+# sudo pip3 install -r requirements.txt
+
+# Option 3: Use a virtual environment (best practice for development)
+# python3 -m venv .venv
+# source .venv/bin/activate
+# pip install -r requirements.txt
 ```
 
 4. **Install OLED display script**:
@@ -188,8 +197,9 @@ The OLED display shows:
 
 **Wrong I2C bus:**
 - If you're using a different I2C bus, you may need to modify the Python script
-- The script uses `board.SCL` and `board.SDA` which should auto-detect the correct pins
+- The script uses `board.SCL` and `board.SDA`, which are the default I2C pins defined by the board library (they do not auto-detect alternate buses or pins)
 - For manual configuration, check which I2C bus your display is on with `i2cdetect`
+- You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
 
 ## Configuration
 

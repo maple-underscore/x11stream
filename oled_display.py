@@ -33,6 +33,8 @@ WIDTH = 128
 HEIGHT = 64
 
 # I2C address (default for SSD1306)
+# Most SSD1306 displays use 0x3C, but some use 0x3D
+# To change: set I2C_ADDRESS environment variable or modify this value
 I2C_ADDRESS = 0x3C
 
 def get_local_ip():
@@ -57,15 +59,18 @@ def get_local_ip():
             timeout=2
         )
         if result.returncode == 0:
-            for part in result.stdout.split():
-                if '.' in part and part.count('.') == 3:
-                    # Basic validation for IPv4
-                    try:
-                        octets = part.split('.')
-                        if all(0 <= int(o) <= 255 for o in octets):
-                            return part
-                    except (ValueError, IndexError):
-                        continue
+            # Match the shell script logic: awk '{print $7; exit}'
+            # The 7th field contains the source IP address
+            parts = result.stdout.split()
+            if len(parts) >= 7:
+                ip = parts[6]  # 0-indexed, so field 7 is index 6
+                # Validate it's a valid IPv4 address
+                try:
+                    octets = ip.split('.')
+                    if len(octets) == 4 and all(0 <= int(o) <= 255 for o in octets):
+                        return ip
+                except (ValueError, IndexError):
+                    pass
         
         # Fallback to hostname -I
         result = subprocess.run(
@@ -100,7 +105,9 @@ def get_stream_status():
             return "Streaming"
         else:
             return "Stopped"
-    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+    except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+        # Log systemctl failure before attempting fallback
+        print(f"Warning: Unable to check systemctl status: {e}", file=sys.stderr)
         # If systemctl is not available, check for ffmpeg process
         try:
             result = subprocess.run(
@@ -111,8 +118,9 @@ def get_stream_status():
             )
             if result.returncode == 0:
                 return "Streaming"
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            pass
+        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+            # Failed to check ffmpeg process; fall back to reporting unknown status
+            print(f"Warning: Unable to check ffmpeg streaming process: {e}", file=sys.stderr)
     
     return "Unknown"
 
@@ -176,27 +184,58 @@ def main():
     print("OLED display initialized successfully")
     print("Displaying IP address and stream status...")
     
+    # Cache previous values to avoid unnecessary updates
+    previous_ip = None
+    previous_status = None
+    
+    # Retry configuration for transient errors
+    max_retries = 3
+    retry_delay = 5  # seconds
+    consecutive_errors = 0
+    
     # Main loop
     try:
         while True:
-            # Get current information
-            ip_address = get_local_ip()
-            status = get_stream_status()
-            
-            # Update display
-            display_info(oled, ip_address, status)
-            
-            # Wait before next update (update every 5 seconds)
-            time.sleep(5)
+            try:
+                # Get current information
+                ip_address = get_local_ip()
+                status = get_stream_status()
+                
+                # Only update display when IP address or status has changed
+                if ip_address != previous_ip or status != previous_status:
+                    display_info(oled, ip_address, status)
+                    previous_ip = ip_address
+                    previous_status = status
+                    # Reset error counter on successful update
+                    consecutive_errors = 0
+                
+                # Wait before next update (update every 5 seconds)
+                time.sleep(5)
+                
+            except Exception as e:
+                # Handle transient I2C errors with retry logic
+                consecutive_errors += 1
+                print(f"Error in display update (attempt {consecutive_errors}/{max_retries}): {e}", file=sys.stderr)
+                
+                if consecutive_errors >= max_retries:
+                    print(f"Maximum retry attempts ({max_retries}) reached. Exiting.", file=sys.stderr)
+                    raise
+                
+                # Wait before retrying
+                print(f"Retrying in {retry_delay} seconds...", file=sys.stderr)
+                time.sleep(retry_delay)
     
     except KeyboardInterrupt:
         print("\nShutting down OLED display...")
         # Clear display on exit
-        oled.fill(0)
-        oled.show()
+        try:
+            oled.fill(0)
+            oled.show()
+        except Exception as e:
+            print(f"Error clearing display on exit: {e}", file=sys.stderr)
         sys.exit(0)
     except Exception as e:
-        print(f"Error in main loop: {e}", file=sys.stderr)
+        print(f"Fatal error in main loop: {e}", file=sys.stderr)
         sys.exit(1)
 
 if __name__ == "__main__":
