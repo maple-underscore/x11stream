@@ -9,6 +9,7 @@ Shell script on Ubuntu to auto-stream X11 display on boot using x11grab and ffmp
 - Auto-starts on boot via systemd service
 - **Interactive mode** for easy configuration
 - **Audio streaming support** with multiple quality presets
+- **Auto-detect resolution** with intelligent scaling (scales down if display is larger than target)
 - Configurable resolution, framerate, bitrate, and audio settings
 - Bandwidth estimation for all configurations
 
@@ -100,18 +101,25 @@ sudo journalctl -u x11stream.service -f
 
 The following environment variables can be set to customize the stream:
 
-| Variable          | Default      | Description                    |
-|-------------------|--------------|--------------------------------|
-| DISPLAY           | :0.0         | X11 display to capture         |
-| RESOLUTION        | 1920x1080    | Capture resolution             |
-| FRAMERATE         | 60           | Frames per second              |
-| BITRATE           | 6M           | Video bitrate                  |
-| HTTP_PORT         | 8080         | HTTP server port               |
-| AUDIO_ENABLED     | false        | Enable audio streaming         |
-| AUDIO_BITRATE     | 128          | Audio bitrate (kbps)           |
-| AUDIO_CODEC       | aac          | Audio codec (aac, mp3, pcm)    |
-| AUDIO_SAMPLE_RATE | 44100        | Sample rate for PCM audio      |
-| AUDIO_BIT_DEPTH   | 16           | Bit depth for PCM audio        |
+| Variable          | Default      | Description                                        |
+|-------------------|--------------|---------------------------------------------------|
+| DISPLAY           | :0.0         | X11 display to capture                            |
+| RESOLUTION        | 1920x1080    | Target resolution (auto-detects and adjusts)      |
+| FRAMERATE         | 60           | Frames per second                                 |
+| BITRATE           | 6M           | Video bitrate                                     |
+| HTTP_PORT         | 8080         | HTTP server port                                  |
+| AUDIO_ENABLED     | false        | Enable audio streaming                            |
+| AUDIO_BITRATE     | 128          | Audio bitrate (kbps)                              |
+| AUDIO_CODEC       | aac          | Audio codec (aac, mp3, pcm)                       |
+| AUDIO_SAMPLE_RATE | 44100        | Sample rate for PCM audio                         |
+| AUDIO_BIT_DEPTH   | 16           | Bit depth for PCM audio                           |
+
+### Resolution Auto-Detection
+
+The script automatically detects your display resolution using `xdpyinfo`:
+- If detected resolution is **higher** than the target: captures full screen and scales down to target
+- If detected resolution is **lower** than the target: uses the native (lower) resolution
+- If resolution cannot be detected: uses the configured target resolution
 
 ### Audio Quality Presets
 
