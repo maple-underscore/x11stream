@@ -1,0 +1,2 @@
+adafruit-circuitpython-ssd1306
+Pillow

@@ -12,6 +12,7 @@ Shell script on Ubuntu to auto-stream X11 display on boot using x11grab and ffmp
 - **Auto-detect resolution** with intelligent scaling (scales down if display is larger than target)
 - Configurable resolution, framerate, bitrate, and audio settings
 - Bandwidth estimation for all configurations
+- **OLED display support** for Orange Pi (SSD1306, 128x64, I2C)
 
 ## Requirements
 
@@ -94,6 +95,125 @@ sudo systemctl status x11stream.service
 # View logs
 sudo journalctl -u x11stream.service -f
 ```
+
+## OLED Display Support (Orange Pi)
+
+The x11stream project supports displaying the local IP address and streaming status on a 0.96" SSD1306 OLED display connected via I2C.
+
+### Hardware Requirements
+
+- Orange Pi (tested on Orange Pi 5)
+- 0.96" OLED Display Module (SSD1306, 128x64 pixels, I2C)
+- I2C connection using pins:
+  - `I2C_SDA_M0` (SDA/Data)
+  - `I2C_SCL_M0` (SCL/Clock)
+  - VCC (3.3V-5V)
+  - GND
+
+### OLED Display Installation
+
+1. **Enable I2C on Orange Pi**:
+```bash
+# Install I2C tools and Python package manager
+sudo apt-get install -y i2c-tools python3-pip
+
+# Enable I2C using armbian-config (recommended method for Armbian-based systems)
+sudo armbian-config
+# Navigate to: System -> Hardware -> enable i2c0 or i2c1
+# Save and reboot
+
+# Alternative: For manual configuration, you can edit /boot/orangepiEnv.txt
+# Add or uncomment the following line:
+# overlays=i2c0
+# Then reboot the system
+```
+
+2. **Verify I2C connection**:
+```bash
+# Check if I2C device is detected (default address: 0x3C)
+sudo i2cdetect -y 0  # Try bus 0
+# or
+sudo i2cdetect -y 1  # Try bus 1
+```
+
+3. **Install Python dependencies**:
+```bash
+cd x11stream
+# Option 1: Install to user directory (recommended)
+pip3 install --user -r requirements.txt
+
+# Option 2: Install system-wide (requires sudo, may conflict with system packages)
+# sudo pip3 install -r requirements.txt
+
+# Option 3: Use a virtual environment (best practice for development)
+# python3 -m venv .venv
+# source .venv/bin/activate
+# pip install -r requirements.txt
+```
+
+4. **Install OLED display script**:
+```bash
+sudo cp oled_display.py /usr/local/bin/
+sudo chmod +x /usr/local/bin/oled_display.py
+```
+
+5. **Install and enable the OLED display service**:
+```bash
+sudo cp oled_display.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable oled_display.service
+sudo systemctl start oled_display.service
+```
+
+### OLED Display Service Management
+```bash
+# Start the OLED display service
+sudo systemctl start oled_display.service
+
+# Stop the OLED display service
+sudo systemctl stop oled_display.service
+
+# Check status
+sudo systemctl status oled_display.service
+
+# View logs
+sudo journalctl -u oled_display.service -f
+```
+
+### OLED Display Information
+
+The OLED display shows:
+- **Header**: "X11 Stream"
+- **IP Address**: Current local IP address (updates every 5 seconds)
+- **Status**: Streaming status ("Streaming", "Stopped", or "Unknown")
+
+### I2C Auto-Check Feature
+
+The script automatically performs I2C diagnostics on startup:
+- **Checks for I2C device nodes**: Verifies `/dev/i2c-*` devices exist
+- **Scans I2C buses**: Uses `i2cdetect` to find SSD1306 display at 0x3C or 0x3D
+- **Provides helpful errors**: Clear guidance if I2C is not configured
+
+Example auto-check output:
+```
+Performing I2C auto-check...
+✓ Found I2C device nodes: /dev/i2c-0, /dev/i2c-1
+✓ I2C device detected on bus 0 at address 0x3C or 0x3D
+```
+
+### Troubleshooting OLED Display
+
+**Display not working:**
+- Verify I2C is enabled: `sudo i2cdetect -y 0` or `sudo i2cdetect -y 1`
+- Check if device appears at address 0x3C
+- Verify wiring connections (SDA, SCL, VCC, GND)
+- Check service logs: `sudo journalctl -u oled_display.service -f`
+
+**Wrong I2C bus:**
+- If you're using a different I2C bus, you may need to modify the Python script
+- The script uses `board.SCL` and `board.SDA`, which are the default I2C pins defined by the board library (they do not auto-detect alternate buses or pins)
+- For manual configuration, check which I2C bus your display is on with `i2cdetect`
+- You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
 
 ## Configuration
 
