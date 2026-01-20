@@ -8,6 +8,8 @@ Connected via I2C (I2C_SDA_M0 and I2C_SCL_M0 pins)
 import time
 import sys
 import subprocess
+import glob
+import os
 
 # Import board library for I2C pin definitions
 try:
@@ -124,6 +126,69 @@ def get_stream_status():
     
     return "Unknown"
 
+def check_i2c_available():
+    """Check if I2C is available and detect I2C buses.
+    
+    Performs diagnostic checks:
+    1. Checks for /dev/i2c-* device nodes
+    2. Attempts to detect I2C device using i2cdetect
+    3. Provides helpful error messages if I2C is not configured
+    
+    Returns:
+        bool: True if I2C appears to be available, False otherwise
+    """
+    print("Performing I2C auto-check...")
+    
+    # Check for I2C device nodes
+    i2c_devices = glob.glob('/dev/i2c-*')
+    
+    if not i2c_devices:
+        print("Error: No I2C device nodes found under /dev/", file=sys.stderr)
+        print("I2C may not be enabled. Please enable I2C:", file=sys.stderr)
+        print("  - Use: sudo armbian-config -> System -> Hardware -> enable i2c0 or i2c1", file=sys.stderr)
+        print("  - Or manually edit /boot/orangepiEnv.txt and add: overlays=i2c0", file=sys.stderr)
+        print("  - Then reboot the system", file=sys.stderr)
+        return False
+    
+    print(f"✓ Found I2C device nodes: {', '.join(i2c_devices)}")
+    
+    # Try to detect the I2C device using i2cdetect
+    i2c_found = False
+    for device in i2c_devices:
+        # Extract bus number from /dev/i2c-N
+        bus_num = device.split('-')[-1]
+        
+        try:
+            # Run i2cdetect to scan the I2C bus
+            # -y: disable interactive mode
+            result = subprocess.run(
+                ["i2cdetect", "-y", bus_num],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0:
+                # Check if our I2C address (0x3C or 0x3D) appears in the output
+                output = result.stdout.lower()
+                if '3c' in output or '3d' in output:
+                    print(f"✓ I2C device detected on bus {bus_num} at address 0x3C or 0x3D")
+                    i2c_found = True
+                    break
+        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
+            # i2cdetect may not be available or may require permissions
+            print(f"Warning: Could not run i2cdetect on bus {bus_num}: {e}", file=sys.stderr)
+    
+    if not i2c_found:
+        print("Warning: Could not automatically detect SSD1306 device (0x3C/0x3D)", file=sys.stderr)
+        print("This may be normal if:", file=sys.stderr)
+        print("  - The display is not yet connected", file=sys.stderr)
+        print("  - i2cdetect requires sudo permissions", file=sys.stderr)
+        print("  - The device is on a different I2C bus", file=sys.stderr)
+        print("Continuing with initialization attempt...", file=sys.stderr)
+    
+    return True  # Return True if device nodes exist, even if detection fails
+
 def init_display():
     """Initialize the I2C connection and OLED display."""
     try:
@@ -174,6 +239,13 @@ def display_info(oled, ip_address, status):
 def main():
     """Main loop to update display information."""
     print("Initializing OLED display...")
+    
+    # Perform I2C auto-check
+    if not check_i2c_available():
+        print("I2C auto-check failed. Cannot continue.", file=sys.stderr)
+        sys.exit(1)
+    
+    print()  # Add blank line for readability
     
     # Initialize display
     oled = init_display()

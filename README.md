@@ -187,6 +187,20 @@ The OLED display shows:
 - **IP Address**: Current local IP address (updates every 5 seconds)
 - **Status**: Streaming status ("Streaming", "Stopped", or "Unknown")
 
+### I2C Auto-Check Feature
+
+The script automatically performs I2C diagnostics on startup:
+- **Checks for I2C device nodes**: Verifies `/dev/i2c-*` devices exist
+- **Scans I2C buses**: Uses `i2cdetect` to find SSD1306 display at 0x3C or 0x3D
+- **Provides helpful errors**: Clear guidance if I2C is not configured
+
+Example auto-check output:
+```
+Performing I2C auto-check...
+✓ Found I2C device nodes: /dev/i2c-0, /dev/i2c-1
+✓ I2C device detected on bus 0 at address 0x3C or 0x3D
+```
+
 ### Troubleshooting OLED Display
 
 **Display not working:**
