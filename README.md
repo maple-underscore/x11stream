@@ -25,6 +25,16 @@ sudo apt update
 sudo apt install ffmpeg
 ```
 
+Install x11-utils:
+```bash
+sudo apt-get install x11-utils
+```
+
+Configure ffmpeg to use x11grab and libx264:
+```bash
+sudo ./configure --enable-x11grab --enable-libx264
+```
+
 ## Installation
 
 1. Clone this repository:
