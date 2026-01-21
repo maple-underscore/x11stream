@@ -251,6 +251,14 @@ sudo cp x11stream.sh /usr/local/bin/
 sudo chmod +x /usr/local/bin/x11stream.sh
 print_success "x11stream.sh installed"
 
+# Install x11stream wrapper script
+if [ -f "x11stream-wrapper.sh" ]; then
+    print_info "Copying x11stream-wrapper.sh to /usr/local/bin/..."
+    sudo cp x11stream-wrapper.sh /usr/local/bin/
+    sudo chmod +x /usr/local/bin/x11stream-wrapper.sh
+    print_success "x11stream-wrapper.sh installed"
+fi
+
 # Install systemd service for x11stream
 print_info "Installing x11stream systemd service..."
 sudo cp x11stream.service /etc/systemd/system/
@@ -303,8 +311,8 @@ if [[ ! "$enable_x11stream" =~ ^[Nn]$ ]]; then
         IP_ADDRESS=$(ip route get 1 2>/dev/null | awk '{print $7; exit}' || hostname -I | awk '{print $1}')
         echo ""
         print_info "Stream is available at:"
-        echo "  http://${IP_ADDRESS}:8080/stream"
-        echo "  http://localhost:8080/stream"
+        echo "  http://${IP_ADDRESS}:8080/stream.m3u8"
+        echo "  http://localhost:8080/stream.m3u8"
     fi
 fi
 

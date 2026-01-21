@@ -1,15 +1,26 @@
 #!/bin/bash
 #
-# x11stream.sh - Stream X11 display via HTTP using ffmpeg
+# x11stream.sh - Stream X11 display via HLS using ffmpeg
 #
-# This script captures the X11 display and makes it available via HTTP
-# Access the stream at: http://{ip}:8080/stream
+# This script captures the X11 display and makes it available via HLS
+# Access the stream at: http://{ip}:8080/stream.m3u8
 #
 # Run with --interactive or -i for interactive mode
 # Run without arguments for non-interactive mode using environment variables
 #
 
 set -e
+
+# Trap to ensure cleanup on exit
+cleanup() {
+    echo "Cleaning up HLS segments..."
+    rm -rf /tmp/hls/*
+    # Kill HTTP server if it's running
+    if [ -n "$HTTP_SERVER_PID" ] && kill -0 "$HTTP_SERVER_PID" 2>/dev/null; then
+        kill "$HTTP_SERVER_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
 
 # ============================================
 # Audio Presets with Bandwidth Estimates
@@ -38,6 +49,7 @@ TARGET_RESOLUTION="${RESOLUTION:-1920x1080}"
 FRAMERATE="${FRAMERATE:-60}"
 VIDEO_BITRATE="${BITRATE:-6M}"
 HTTP_PORT="${HTTP_PORT:-8080}"
+HTTP_BIND="${HTTP_BIND:-0.0.0.0}"
 AUDIO_ENABLED="${AUDIO_ENABLED:-false}"
 AUDIO_BITRATE="${AUDIO_BITRATE:-128}"
 AUDIO_SAMPLE_RATE="${AUDIO_SAMPLE_RATE:-44100}"
@@ -45,6 +57,10 @@ AUDIO_BIT_DEPTH="${AUDIO_BIT_DEPTH:-16}"
 AUDIO_CODEC="${AUDIO_CODEC:-aac}"
 AUDIO_SOURCE="${AUDIO_SOURCE:-default}"
 INTERACTIVE_MODE=false
+HLS_DIR="${HLS_DIR:-/tmp/hls}"
+HLS_TIME="${HLS_TIME:-1}"
+HLS_LIST_SIZE="${HLS_LIST_SIZE:-3}"
+USE_HARDWARE_ACCEL="${USE_HARDWARE_ACCEL:-auto}"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -86,6 +102,37 @@ get_ip() {
 }
 
 IP_ADDRESS=$(get_ip)
+
+# Detect hardware acceleration support
+detect_hardware_accel() {
+    # Check for Rockchip MPP support (rkmpp)
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q "h264_rkmpp"; then
+        echo "rkmpp"
+        return
+    fi
+    # Check for VAAPI support
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q "h264_vaapi"; then
+        echo "vaapi"
+        return
+    fi
+    # Check for QSV support
+    if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q "h264_qsv"; then
+        echo "qsv"
+        return
+    fi
+    # Default to software encoding
+    echo "none"
+}
+
+# Detect available hardware acceleration
+if [ "$USE_HARDWARE_ACCEL" = "auto" ]; then
+    DETECTED_ACCEL=$(detect_hardware_accel)
+    if [ "$DETECTED_ACCEL" != "none" ]; then
+        USE_HARDWARE_ACCEL="$DETECTED_ACCEL"
+    else
+        USE_HARDWARE_ACCEL="none"
+    fi
+fi
 
 # Validate IP address
 if [ -z "$IP_ADDRESS" ]; then
@@ -349,6 +396,21 @@ interactive_setup() {
     read -p "HTTP port (default: 8080): " port_input
     [ -n "$port_input" ] && HTTP_PORT="$port_input"
     
+    # Hardware acceleration
+    echo ""
+    echo "Hardware Acceleration:"
+    echo "  Detected: $USE_HARDWARE_ACCEL"
+    if [ "$USE_HARDWARE_ACCEL" != "none" ]; then
+        echo "  1) Use hardware acceleration ($USE_HARDWARE_ACCEL)"
+        echo "  2) Use software encoding (libx264)"
+        read -p "Select option [1-2] (default: 1): " accel_choice
+        if [ "$accel_choice" = "2" ]; then
+            USE_HARDWARE_ACCEL="none"
+        fi
+    else
+        echo "  No hardware acceleration detected, using software encoding"
+    fi
+    
     echo ""
     echo "============================================"
     echo "Configuration Summary"
@@ -406,6 +468,11 @@ else
 fi
 echo "Framerate:   $FRAMERATE fps"
 echo "Video:       $VIDEO_BITRATE"
+if [ "$USE_HARDWARE_ACCEL" != "none" ]; then
+    echo "Encoder:     Hardware ($USE_HARDWARE_ACCEL)"
+else
+    echo "Encoder:     Software (libx264)"
+fi
 if [ "$AUDIO_ENABLED" = "true" ]; then
     if [ "$AUDIO_CODEC" = "pcm" ]; then
         echo "Audio:       PCM ${AUDIO_BIT_DEPTH}-bit @ ${AUDIO_SAMPLE_RATE} Hz"
@@ -417,12 +484,13 @@ else
     echo "Audio:       Disabled"
 fi
 echo "HTTP Port:   $HTTP_PORT"
+echo "Stream Type: HLS (HTTP Live Streaming)"
 echo ""
 echo "Estimated bandwidth: $(calculate_bandwidth)"
 echo ""
 echo "Access your stream at:"
-echo "  http://${IP_ADDRESS}:${HTTP_PORT}/stream"
-echo "  http://localhost:${HTTP_PORT}/stream"
+echo "  http://${IP_ADDRESS}:${HTTP_PORT}/stream.m3u8"
+echo "  http://localhost:${HTTP_PORT}/stream.m3u8"
 echo "============================================"
 
 # Build and execute ffmpeg command
@@ -435,32 +503,122 @@ else
     VIDEO_FILTER_ARGS=""
 fi
 
-# Run ffmpeg with x11grab and output to HTTP via mpegts
-# The -listen 1 flag makes ffmpeg act as an HTTP server
-# Low-latency settings:
-#   -probesize 32768: Minimal probe size (32KB) for faster stream start
-#   -analyzeduration 0: Skip analysis delay for immediate processing
+# Create HLS directory
+mkdir -p "$HLS_DIR"
+
+# Build encoder-specific arguments
+build_encoder_args() {
+    local encoder_args=""
+    
+    case "$USE_HARDWARE_ACCEL" in
+        rkmpp)
+            # Rockchip MPP hardware encoder settings for low latency
+            encoder_args="-c:v h264_rkmpp"
+            encoder_args="$encoder_args -rc_mode CBR"
+            encoder_args="$encoder_args -profile:v high"
+            encoder_args="$encoder_args -level 41"
+            # GOP settings for low latency: 1 second GOP
+            encoder_args="$encoder_args -g $FRAMERATE -keyint_min $FRAMERATE"
+            ;;
+        vaapi)
+            # VAAPI hardware encoder settings
+            encoder_args="-vaapi_device /dev/dri/renderD128"
+            encoder_args="$encoder_args -vf 'format=nv12,hwupload'"
+            encoder_args="$encoder_args -c:v h264_vaapi"
+            encoder_args="$encoder_args -profile:v high"
+            encoder_args="$encoder_args -g $FRAMERATE -keyint_min $FRAMERATE"
+            ;;
+        qsv)
+            # Intel Quick Sync Video settings
+            encoder_args="-c:v h264_qsv"
+            encoder_args="$encoder_args -preset fast"
+            encoder_args="$encoder_args -g $FRAMERATE -keyint_min $FRAMERATE"
+            ;;
+        *)
+            # Software encoding with libx264 - optimized for low latency
+            encoder_args="-c:v libx264"
+            encoder_args="$encoder_args -preset veryfast"
+            encoder_args="$encoder_args -tune zerolatency"
+            encoder_args="$encoder_args -x264-params bframes=0:rc-lookahead=0:sync-lookahead=0:sliced-threads=1"
+            # GOP size: 1 second for low latency
+            encoder_args="$encoder_args -g $FRAMERATE -keyint_min $FRAMERATE"
+            encoder_args="$encoder_args -sc_threshold 0"
+            ;;
+    esac
+    
+    echo "$encoder_args"
+}
+
+ENCODER_ARGS=$(build_encoder_args)
+
+# Start simple HTTP server for HLS in background
+start_http_server() {
+    cd "$HLS_DIR"
+    # Use Python's built-in HTTP server
+    # Note: For production use with sensitive data, consider adding authentication or using nginx
+    python3 -m http.server "$HTTP_PORT" --bind "$HTTP_BIND" &
+    HTTP_SERVER_PID=$!
+    cd - > /dev/null
+    echo "HTTP server started (PID: $HTTP_SERVER_PID) on http://$HTTP_BIND:$HTTP_PORT"
+    if [ "$HTTP_BIND" = "0.0.0.0" ]; then
+        echo "Warning: Server is accessible from all network interfaces"
+        echo "         Set HTTP_BIND=127.0.0.1 to restrict to localhost only"
+    fi
+}
+
+# Check if HTTP_PORT is already in use
+if command -v lsof &> /dev/null && lsof -Pi :$HTTP_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "Warning: Port $HTTP_PORT is already in use. Trying to continue anyway..."
+fi
+
+# Start HTTP server
+start_http_server
+
+# Common ffmpeg input parameters for low latency
+INPUT_PARAMS="-thread_queue_size 512 -probesize 32768 -fflags nobuffer -flags low_delay -strict experimental"
+
+# Run ffmpeg with HLS output
+# HLS settings for ultra-low latency:
+#   -hls_time 1: 1 second segments for low latency
+#   -hls_list_size 3: Keep only 3 segments in playlist (3 seconds of buffer)
+#   -hls_flags delete_segments+append_list: Delete old segments and append to playlist
+#   -hls_segment_type mpegts: Use MPEG-TS for segments
+#   -start_number 0: Start segment numbering at 0
+#   -hls_allow_cache 0: Disable caching for live streaming
 if [ "$AUDIO_ENABLED" = "true" ]; then
-    exec ffmpeg -fflags nobuffer -flags low_delay -probesize 32768 -analyzeduration 0 \
+    ffmpeg $INPUT_PARAMS \
         -f x11grab -video_size "$CAPTURE_RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
         $AUDIO_ARGS \
         ${VIDEO_FILTER_ARGS:+$VIDEO_FILTER_ARGS} \
-        -c:v libx264 -preset ultrafast -tune zerolatency \
-        -x264-params "bframes=0:rc-lookahead=0:sync-lookahead=0:sliced-threads=1" \
-        -g 15 -keyint_min 15 -sc_threshold 0 \
-        -b:v "$VIDEO_BITRATE" -maxrate "$VIDEO_BITRATE" -bufsize 256k \
+        $ENCODER_ARGS \
+        -b:v "$VIDEO_BITRATE" -maxrate "$VIDEO_BITRATE" -bufsize 512k \
         -pix_fmt yuv420p \
-        -f mpegts \
-        -listen 1 "http://0.0.0.0:${HTTP_PORT}/stream"
+        -f hls \
+        -hls_time "$HLS_TIME" \
+        -hls_list_size "$HLS_LIST_SIZE" \
+        -hls_flags delete_segments+append_list \
+        -hls_segment_type mpegts \
+        -start_number 0 \
+        -hls_allow_cache 0 \
+        "$HLS_DIR/stream.m3u8"
 else
-    exec ffmpeg -fflags nobuffer -flags low_delay -probesize 32768 -analyzeduration 0 \
+    ffmpeg $INPUT_PARAMS \
         -f x11grab -video_size "$CAPTURE_RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
         ${VIDEO_FILTER_ARGS:+$VIDEO_FILTER_ARGS} \
-        -c:v libx264 -preset ultrafast -tune zerolatency \
-        -x264-params "bframes=0:rc-lookahead=0:sync-lookahead=0:sliced-threads=1" \
-        -g "$(((FRAMERATE/10)>0?(FRAMERATE/10):1))" -keyint_min 15 -sc_threshold 0 \
-        -b:v "$VIDEO_BITRATE" -maxrate "$VIDEO_BITRATE" -bufsize 256k \
+        $ENCODER_ARGS \
+        -b:v "$VIDEO_BITRATE" -maxrate "$VIDEO_BITRATE" -bufsize 512k \
         -pix_fmt yuv420p \
-        -f mpegts \
-        -listen 1 "http://0.0.0.0:${HTTP_PORT}/stream"
+        -f hls \
+        -hls_time "$HLS_TIME" \
+        -hls_list_size "$HLS_LIST_SIZE" \
+        -hls_flags delete_segments+append_list \
+        -hls_segment_type mpegts \
+        -start_number 0 \
+        -hls_allow_cache 0 \
+        "$HLS_DIR/stream.m3u8"
 fi
+
+# Cleanup will be called by the trap
+exit_code=$?
+echo "ffmpeg exited with code: $exit_code"
+exit $exit_code

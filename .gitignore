@@ -18,3 +18,11 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test files
+test_*.sh
+
+# HLS streaming
+/tmp/hls/
+*.m3u8
+*.ts
