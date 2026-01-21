@@ -10,12 +10,15 @@ Environment="RESOLUTION=1920x1080"
 Environment="FRAMERATE=60"
 Environment="BITRATE=6M"
 Environment="HTTP_PORT=8080"
+Environment="USE_HARDWARE_ACCEL=auto"
 ExecStart=/usr/local/bin/x11stream.sh
-Restart=on-failure
+Restart=always
 RestartSec=5
 # Note: Running as root for X11 access. For better security, create a dedicated
 # user in the 'video' group with X11 display access and update this line.
 User=root
+# Clean up HLS directory on stop
+ExecStopPost=/bin/bash -c 'rm -rf /tmp/hls/*'
 
 [Install]
 WantedBy=graphical.target

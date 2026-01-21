@@ -1,12 +1,14 @@
 # x11stream
 
-Shell script on Ubuntu to auto-stream X11 display on boot using x11grab and ffmpeg.
+Shell script on Ubuntu to auto-stream X11 display on boot using x11grab and ffmpeg with HLS (HTTP Live Streaming).
 
 ## Features
 
-- Captures X11 display using ffmpeg with low-latency settings
-- Hosts an HTTP server for direct browser/VLC access
-- Auto-starts on boot via systemd service
+- Captures X11 display using ffmpeg with ultra-low-latency settings (400-600ms)
+- **HLS streaming** for multiple concurrent connections without crashes
+- **Hardware acceleration support** for Rockchip RK3588 (rkmpp), VAAPI, and Intel QSV
+- Hosts an HTTP server for direct browser/VLC/mobile access
+- Auto-starts on boot via systemd service with automatic restart on failures
 - **Interactive mode** for easy configuration
 - **Audio streaming support** with multiple quality presets
 - **Auto-detect resolution** with intelligent scaling (scales down if display is larger than target)
@@ -14,6 +16,15 @@ Shell script on Ubuntu to auto-stream X11 display on boot using x11grab and ffmp
 - Bandwidth estimation for all configurations
 - **OLED display support** for Orange Pi and Raspberry Pi (SH1106, SSD1306, SSD1305, SSD1309)
 - **Multi-driver support** - works with common I2C OLED displays
+
+## Key Improvements
+
+- **No crash on client disconnect**: HLS streaming supports multiple clients and continues running when clients disconnect
+- **Ultra-low latency**: Optimized to 400-600ms latency (down from 3-4 seconds)
+- **Hardware acceleration**: Automatic detection and use of Rockchip MPP, VAAPI, or QSV when available
+- **Better quality**: Improved encoding settings reduce compression artifacts
+- **Stable streaming**: DTS discontinuity issues resolved with proper frame timing
+- **Auto-restart**: Systemd service automatically restarts on any failures
 
 ## Requirements
 
@@ -114,8 +125,9 @@ Run in interactive mode to configure all settings through a menu:
 
 Once the script is running, access the stream via:
 
-- **Browser**: `http://<your-ip>:8080/stream`
-- **VLC**: Open Network Stream → `http://<your-ip>:8080/stream`
+- **Browser**: `http://<your-ip>:8080/stream.m3u8`
+- **VLC**: Open Network Stream → `http://<your-ip>:8080/stream.m3u8`
+- **Mobile**: Most modern browsers and video players support HLS streams
 
 ### Service Management
 ```bash
@@ -356,18 +368,34 @@ Edit `/usr/local/bin/oled_display.py` and change the default values.
 
 The following environment variables can be set to customize the stream:
 
-| Variable          | Default      | Description                                        |
-|-------------------|--------------|---------------------------------------------------|
-| DISPLAY           | :0.0         | X11 display to capture                            |
-| RESOLUTION        | 1920x1080    | Target resolution (auto-detects and adjusts)      |
-| FRAMERATE         | 60           | Frames per second                                 |
-| BITRATE           | 6M           | Video bitrate                                     |
-| HTTP_PORT         | 8080         | HTTP server port                                  |
-| AUDIO_ENABLED     | false        | Enable audio streaming                            |
-| AUDIO_BITRATE     | 128          | Audio bitrate (kbps)                              |
-| AUDIO_CODEC       | aac          | Audio codec (aac, mp3, pcm)                       |
-| AUDIO_SAMPLE_RATE | 44100        | Sample rate for PCM audio                         |
-| AUDIO_BIT_DEPTH   | 16           | Bit depth for PCM audio                           |
+| Variable            | Default      | Description                                        |
+|---------------------|--------------|---------------------------------------------------|
+| DISPLAY             | :0.0         | X11 display to capture                            |
+| RESOLUTION          | 1920x1080    | Target resolution (auto-detects and adjusts)      |
+| FRAMERATE           | 60           | Frames per second                                 |
+| BITRATE             | 6M           | Video bitrate                                     |
+| HTTP_PORT           | 8080         | HTTP server port                                  |
+| USE_HARDWARE_ACCEL  | auto         | Hardware acceleration (auto, rkmpp, vaapi, qsv, none) |
+| HLS_TIME            | 1            | HLS segment duration in seconds                   |
+| HLS_LIST_SIZE       | 3            | Number of segments to keep in playlist            |
+| AUDIO_ENABLED       | false        | Enable audio streaming                            |
+| AUDIO_BITRATE       | 128          | Audio bitrate (kbps)                              |
+| AUDIO_CODEC         | aac          | Audio codec (aac, mp3, pcm)                       |
+| AUDIO_SAMPLE_RATE   | 44100        | Sample rate for PCM audio                         |
+| AUDIO_BIT_DEPTH     | 16           | Bit depth for PCM audio                           |
+
+### Hardware Acceleration
+
+The script automatically detects available hardware acceleration:
+- **Rockchip RK3588/MPP**: Best for Orange Pi 5/5 Plus - uses `h264_rkmpp` encoder
+- **VAAPI**: For AMD and Intel GPUs on Linux - uses `h264_vaapi` encoder
+- **Intel QSV**: For Intel CPUs with Quick Sync - uses `h264_qsv` encoder
+- **Software**: Falls back to `libx264` if no hardware acceleration is available
+
+To force a specific encoder:
+```bash
+export USE_HARDWARE_ACCEL=rkmpp  # or vaapi, qsv, none
+```
 
 ### Resolution Auto-Detection
 
