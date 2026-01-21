@@ -458,7 +458,7 @@ else
         ${VIDEO_FILTER_ARGS:+$VIDEO_FILTER_ARGS} \
         -c:v libx264 -preset ultrafast -tune zerolatency \
         -x264-params "bframes=0:rc-lookahead=0:sync-lookahead=0:sliced-threads=1" \
-        -g 15 -keyint_min 15 -sc_threshold 0 \
+        -g "$(((FRAMERATE/10)>0?(FRAMERATE/10):1))" -keyint_min 15 -sc_threshold 0 \
         -b:v "$VIDEO_BITRATE" -maxrate "$VIDEO_BITRATE" -bufsize 256k \
         -pix_fmt yuv420p \
         -f mpegts \
