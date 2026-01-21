@@ -9,9 +9,24 @@
 set -e
 
 SCRIPT_DIR="/usr/local/bin"
+SCRIPT_PATH="$SCRIPT_DIR/x11stream.sh"
 RESTART_DELAY="${RESTART_DELAY:-5}"
 MAX_RESTARTS="${MAX_RESTARTS:-0}"  # 0 = unlimited
 restart_count=0
+
+# Check if x11stream.sh exists
+if [ ! -f "$SCRIPT_PATH" ]; then
+    echo "Error: x11stream.sh not found at $SCRIPT_PATH" >&2
+    echo "Please ensure the script is installed at the expected location" >&2
+    exit 1
+fi
+
+# Check if the script is executable
+if [ ! -x "$SCRIPT_PATH" ]; then
+    echo "Error: x11stream.sh is not executable" >&2
+    echo "Run: sudo chmod +x $SCRIPT_PATH" >&2
+    exit 1
+fi
 
 echo "Starting x11stream with auto-restart capability"
 echo "Restart delay: ${RESTART_DELAY}s"
@@ -29,7 +44,7 @@ while true; do
     
     # Run x11stream.sh and capture exit code
     set +e
-    "$SCRIPT_DIR/x11stream.sh"
+    "$SCRIPT_PATH"
     exit_code=$?
     set -e
     

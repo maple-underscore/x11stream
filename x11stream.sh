@@ -15,7 +15,10 @@ set -e
 cleanup() {
     echo "Cleaning up HLS segments..."
     rm -rf /tmp/hls/*
-    pkill -P $$ || true
+    # Kill HTTP server if it's running
+    if [ -n "$HTTP_SERVER_PID" ] && kill -0 "$HTTP_SERVER_PID" 2>/dev/null; then
+        kill "$HTTP_SERVER_PID" 2>/dev/null || true
+    fi
 }
 trap cleanup EXIT INT TERM
 
@@ -46,6 +49,7 @@ TARGET_RESOLUTION="${RESOLUTION:-1920x1080}"
 FRAMERATE="${FRAMERATE:-60}"
 VIDEO_BITRATE="${BITRATE:-6M}"
 HTTP_PORT="${HTTP_PORT:-8080}"
+HTTP_BIND="${HTTP_BIND:-0.0.0.0}"
 AUDIO_ENABLED="${AUDIO_ENABLED:-false}"
 AUDIO_BITRATE="${AUDIO_BITRATE:-128}"
 AUDIO_SAMPLE_RATE="${AUDIO_SAMPLE_RATE:-44100}"
@@ -550,12 +554,22 @@ ENCODER_ARGS=$(build_encoder_args)
 # Start simple HTTP server for HLS in background
 start_http_server() {
     cd "$HLS_DIR"
-    # Use Python's built-in HTTP server with proper CORS headers
-    python3 -m http.server "$HTTP_PORT" --bind 0.0.0.0 &
+    # Use Python's built-in HTTP server
+    # Note: For production use with sensitive data, consider adding authentication or using nginx
+    python3 -m http.server "$HTTP_PORT" --bind "$HTTP_BIND" &
     HTTP_SERVER_PID=$!
     cd - > /dev/null
-    echo "HTTP server started (PID: $HTTP_SERVER_PID)"
+    echo "HTTP server started (PID: $HTTP_SERVER_PID) on http://$HTTP_BIND:$HTTP_PORT"
+    if [ "$HTTP_BIND" = "0.0.0.0" ]; then
+        echo "Warning: Server is accessible from all network interfaces"
+        echo "         Set HTTP_BIND=127.0.0.1 to restrict to localhost only"
+    fi
 }
+
+# Check if HTTP_PORT is already in use
+if command -v lsof &> /dev/null && lsof -Pi :$HTTP_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "Warning: Port $HTTP_PORT is already in use. Trying to continue anyway..."
+fi
 
 # Start HTTP server
 start_http_server
@@ -572,7 +586,7 @@ INPUT_PARAMS="-thread_queue_size 512 -probesize 32768 -fflags nobuffer -flags lo
 #   -start_number 0: Start segment numbering at 0
 #   -hls_allow_cache 0: Disable caching for live streaming
 if [ "$AUDIO_ENABLED" = "true" ]; then
-    exec ffmpeg $INPUT_PARAMS \
+    ffmpeg $INPUT_PARAMS \
         -f x11grab -video_size "$CAPTURE_RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
         $AUDIO_ARGS \
         ${VIDEO_FILTER_ARGS:+$VIDEO_FILTER_ARGS} \
@@ -588,7 +602,7 @@ if [ "$AUDIO_ENABLED" = "true" ]; then
         -hls_allow_cache 0 \
         "$HLS_DIR/stream.m3u8"
 else
-    exec ffmpeg $INPUT_PARAMS \
+    ffmpeg $INPUT_PARAMS \
         -f x11grab -video_size "$CAPTURE_RESOLUTION" -framerate "$FRAMERATE" -i "$DISPLAY_NUM" \
         ${VIDEO_FILTER_ARGS:+$VIDEO_FILTER_ARGS} \
         $ENCODER_ARGS \
@@ -603,3 +617,8 @@ else
         -hls_allow_cache 0 \
         "$HLS_DIR/stream.m3u8"
 fi
+
+# Cleanup will be called by the trap
+exit_code=$?
+echo "ffmpeg exited with code: $exit_code"
+exit $exit_code

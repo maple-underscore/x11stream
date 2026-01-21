@@ -375,6 +375,7 @@ The following environment variables can be set to customize the stream:
 | FRAMERATE           | 60           | Frames per second                                 |
 | BITRATE             | 6M           | Video bitrate                                     |
 | HTTP_PORT           | 8080         | HTTP server port                                  |
+| HTTP_BIND           | 0.0.0.0      | HTTP server bind address (0.0.0.0 or 127.0.0.1)   |
 | USE_HARDWARE_ACCEL  | auto         | Hardware acceleration (auto, rkmpp, vaapi, qsv, none) |
 | HLS_TIME            | 1            | HLS segment duration in seconds                   |
 | HLS_LIST_SIZE       | 3            | Number of segments to keep in playlist            |
@@ -396,6 +397,23 @@ To force a specific encoder:
 ```bash
 export USE_HARDWARE_ACCEL=rkmpp  # or vaapi, qsv, none
 ```
+
+### Security Considerations
+
+The HTTP server binds to `0.0.0.0` by default, making the stream accessible from all network interfaces. For enhanced security:
+
+```bash
+# Restrict to localhost only
+export HTTP_BIND=127.0.0.1
+
+# Or restrict to specific interface
+export HTTP_BIND=192.168.1.100
+```
+
+For production use with sensitive data, consider:
+- Using a reverse proxy (nginx) with authentication
+- Setting up a VPN for remote access
+- Using firewall rules to restrict access
 
 ### Resolution Auto-Detection
 
