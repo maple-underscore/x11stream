@@ -267,15 +267,20 @@ if [ "$ENABLE_OLED" = true ]; then
     # Create environment file for OLED service with driver and address
     print_info "Configuring OLED display service..."
     sudo mkdir -p /etc/default
-    sudo bash -c "cat > /etc/default/oled_display << EOF
+    sudo bash -c "cat > /etc/default/oled_display << 'EOF'
 # OLED Display Configuration
 OLED_DRIVER=$OLED_DRIVER
 I2C_ADDRESS=$i2c_addr
 EOF"
     
-    # Update service file to use environment file
-    sudo cp oled_display.service /etc/systemd/system/
-    sudo sed -i '/\[Service\]/a EnvironmentFile=-/etc/default/oled_display' /etc/systemd/system/oled_display.service
+    # Copy and update service file to use environment file
+    sudo cp oled_display.service /etc/systemd/system/oled_display.service
+    
+    # Insert EnvironmentFile line after [Service] section if not already present
+    if ! sudo grep -q "EnvironmentFile" /etc/systemd/system/oled_display.service; then
+        sudo sed -i '/^\[Service\]/a EnvironmentFile=-/etc/default/oled_display' /etc/systemd/system/oled_display.service
+    fi
+    
     sudo systemctl daemon-reload
     print_success "OLED display service installed"
 fi

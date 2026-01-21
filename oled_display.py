@@ -241,17 +241,11 @@ def init_display():
         # Create the OLED display class based on driver selection
         driver_module = DRIVER_MODULES[OLED_DRIVER]
         
-        if OLED_DRIVER == 'ssd1306':
-            oled = driver_module.SSD1306_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
-        elif OLED_DRIVER == 'sh1106':
-            oled = driver_module.SH1106_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
-        elif OLED_DRIVER == 'ssd1305':
-            oled = driver_module.SSD1305_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
-        elif OLED_DRIVER == 'ssd1309':
-            oled = driver_module.SSD1309_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
-        else:
-            print(f"Error: Driver '{OLED_DRIVER}' not implemented", file=sys.stderr)
-            return None
+        # Initialize the appropriate driver class
+        # All drivers use the same interface: DriverName_I2C(width, height, i2c, addr)
+        driver_class_name = f"{OLED_DRIVER.upper()}_I2C"
+        driver_class = getattr(driver_module, driver_class_name)
+        oled = driver_class(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
         
         # Clear display
         oled.fill(0)

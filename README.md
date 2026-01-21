@@ -246,14 +246,12 @@ sudo chmod +x /usr/local/bin/oled_display.py
 
 6. **Install and enable the OLED display service**:
 ```bash
-sudo cp oled_display.service /etc/systemd/system/
+sudo cp oled_display.service /etc/systemd/system/oled_display.service
 
 # If you created an environment file, update the service to use it:
-sudo bash -c 'cat >> /etc/systemd/system/oled_display.service << EOF
-
-[Service]
-EnvironmentFile=-/etc/default/oled_display
-EOF'
+if ! sudo grep -q "EnvironmentFile" /etc/systemd/system/oled_display.service; then
+    sudo sed -i '/^\[Service\]/a EnvironmentFile=-/etc/default/oled_display' /etc/systemd/system/oled_display.service
+fi
 
 sudo systemctl daemon-reload
 sudo systemctl enable oled_display.service
