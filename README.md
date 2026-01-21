@@ -12,7 +12,8 @@ Shell script on Ubuntu to auto-stream X11 display on boot using x11grab and ffmp
 - **Auto-detect resolution** with intelligent scaling (scales down if display is larger than target)
 - Configurable resolution, framerate, bitrate, and audio settings
 - Bandwidth estimation for all configurations
-- **OLED display support** for Orange Pi (SSD1306, 128x64, I2C)
+- **OLED display support** for Orange Pi and Raspberry Pi (SH1106, SSD1306, SSD1305, SSD1309)
+- **Multi-driver support** - works with common I2C OLED displays
 
 ## Requirements
 
@@ -20,6 +21,26 @@ Shell script on Ubuntu to auto-stream X11 display on boot using x11grab and ffmp
 - ffmpeg with x11grab support
 - PulseAudio or ALSA (for audio streaming)
 - systemd (for auto-start on boot)
+
+## Quick Installation
+
+The easiest way to get started is using the quickstart script:
+
+```bash
+git clone https://github.com/maple-underscore/x11stream.git
+cd x11stream
+./quickstart.sh
+```
+
+The quickstart script will:
+- Install all required dependencies (ffmpeg, i2c-tools, x11-utils, Python packages)
+- Set up OLED display support with your choice of driver (optional)
+- Install and configure systemd services
+- Guide you through the setup process interactively
+
+### Manual Installation
+
+If you prefer to install manually or the quickstart script doesn't work for your system:
 
 Install ffmpeg:
 ```bash
@@ -39,6 +60,20 @@ sudo apt-get install x11-utils
 > ```
 
 ## Installation
+
+### Quick Installation (Recommended)
+
+Use the automated quickstart script:
+
+```bash
+git clone https://github.com/maple-underscore/x11stream.git
+cd x11stream
+./quickstart.sh
+```
+
+The script will guide you through the installation process and configure everything automatically.
+
+### Manual Installation
 
 1. Clone this repository:
 ```bash
@@ -97,21 +132,40 @@ sudo systemctl status x11stream.service
 sudo journalctl -u x11stream.service -f
 ```
 
-## OLED Display Support (Orange Pi)
+## OLED Display Support (Orange Pi / Raspberry Pi)
 
-The x11stream project supports displaying the local IP address and streaming status on a 0.96" SSD1306 OLED display connected via I2C.
+The x11stream project supports displaying the local IP address and streaming status on I2C OLED displays with multiple driver options.
+
+### Supported OLED Drivers
+
+- **SH1106** - 128x64, common in 1.3" displays (default)
+- **SSD1306** - 128x64, common in 0.96" displays
+- **SSD1305** - 128x64
+- **SSD1309** - 128x64
 
 ### Hardware Requirements
 
-- Orange Pi (tested on Orange Pi 5)
-- 0.96" OLED Display Module (SSD1306, 128x64 pixels, I2C)
+- Orange Pi (tested on Orange Pi 5) or Raspberry Pi
+- 0.96" - 1.3" OLED Display Module (128x64 pixels, I2C)
 - I2C connection using pins:
-  - `I2C_SDA_M0` (SDA/Data)
-  - `I2C_SCL_M0` (SCL/Clock)
+  - `I2C_SDA_M0` (SDA/Data) or `GPIO2` (Raspberry Pi)
+  - `I2C_SCL_M0` (SCL/Clock) or `GPIO3` (Raspberry Pi)
   - VCC (3.3V-5V)
   - GND
 
 ### OLED Display Installation
+
+#### Quick Installation (Recommended)
+
+The easiest way is to use the quickstart script which will guide you through driver selection:
+
+```bash
+./quickstart.sh
+```
+
+When prompted, choose to install OLED support and select your driver type.
+
+#### Manual Installation
 
 1. **Enable I2C on Orange Pi**:
 ```bash
@@ -129,6 +183,17 @@ sudo armbian-config
 # Then reboot the system
 ```
 
+**For Raspberry Pi**:
+```bash
+# Install I2C tools
+sudo apt-get install -y i2c-tools python3-pip
+
+# Enable I2C
+sudo raspi-config
+# Navigate to: Interface Options -> I2C -> Enable
+# Reboot the system
+```
+
 2. **Verify I2C connection**:
 ```bash
 # Check if I2C device is detected (default address: 0x3C)
@@ -144,27 +209,50 @@ sudo i2cdetect -y 1  # Try bus 1
 
 ```bash
 cd x11stream
-# Option 1: Install to user directory (recommended)
+
+# Install base dependencies
+pip3 install --user adafruit-blinka Pillow
+
+# Install driver for your display (choose one or install all):
+pip3 install --user adafruit-circuitpython-sh1106   # For SH1106 (default)
+pip3 install --user adafruit-circuitpython-ssd1306  # For SSD1306
+pip3 install --user adafruit-circuitpython-ssd1305  # For SSD1305
+pip3 install --user adafruit-circuitpython-ssd1309  # For SSD1309
+
+# Or install all drivers at once:
 pip3 install --user -r requirements.txt
-
-# Option 2: Install system-wide (requires sudo, may conflict with system packages)
-# sudo pip3 install -r requirements.txt
-
-# Option 3: Use a virtual environment (best practice for development)
-# python3 -m venv .venv
-# source .venv/bin/activate
-# pip install -r requirements.txt
 ```
 
-4. **Install OLED display script**:
+4. **Configure OLED driver** (optional):
+
+Set the driver type and I2C address via environment variables:
+
+```bash
+# Create environment file
+sudo mkdir -p /etc/default
+sudo bash -c 'cat > /etc/default/oled_display << EOF
+OLED_DRIVER=sh1106
+I2C_ADDRESS=0x3C
+EOF'
+```
+
+Available drivers: `sh1106` (default), `ssd1306`, `ssd1305`, `ssd1309`
+
+5. **Install OLED display script**:
 ```bash
 sudo cp oled_display.py /usr/local/bin/
 sudo chmod +x /usr/local/bin/oled_display.py
 ```
 
-5. **Install and enable the OLED display service**:
+6. **Install and enable the OLED display service**:
 ```bash
-sudo cp oled_display.service /etc/systemd/system/
+sudo cp oled_display.service /etc/systemd/system/oled_display.service
+
+# If you created an environment file, update the service to use it:
+if ! sudo grep -q "EnvironmentFile" /etc/systemd/system/oled_display.service; then
+    sudo sed -i '/^\[Service\]/a EnvironmentFile=-/etc/default/oled_display' /etc/systemd/system/oled_display.service
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable oled_display.service
 sudo systemctl start oled_display.service
@@ -197,15 +285,38 @@ The OLED display shows:
 > [!NOTE]
 > The script automatically performs I2C diagnostics on startup:
 > - **Checks for I2C device nodes**: Verifies `/dev/i2c-*` devices exist
-> - **Scans I2C buses**: Uses `i2cdetect` to find SSD1306 display at 0x3C or 0x3D
+> - **Scans I2C buses**: Uses `i2cdetect` to find OLED display at 0x3C or 0x3D
 > - **Provides helpful errors**: Clear guidance if I2C is not configured
+> - **Supports multiple drivers**: Auto-detects and uses the configured driver
 >
 > Example auto-check output:
 > ```
 > Performing I2C auto-check...
 > ✓ Found I2C device nodes: /dev/i2c-0, /dev/i2c-1
 > ✓ I2C device detected on bus 0 at address 0x3C or 0x3D
+> Initializing SH1106 display at I2C address 0x3C...
+> ✓ SH1106 display initialized successfully
 > ```
+
+### Driver Configuration
+
+You can configure the OLED driver in several ways:
+
+1. **Environment variable** (recommended for systemd):
+```bash
+export OLED_DRIVER=sh1106  # or ssd1306, ssd1305, ssd1309
+export I2C_ADDRESS=0x3C    # or 0x3D
+```
+
+2. **System-wide configuration file**:
+```bash
+# Create /etc/default/oled_display
+OLED_DRIVER=sh1106
+I2C_ADDRESS=0x3C
+```
+
+3. **Edit the Python script directly** (not recommended):
+Edit `/usr/local/bin/oled_display.py` and change the default values.
 
 ### Troubleshooting OLED Display
 
@@ -214,9 +325,21 @@ The OLED display shows:
 > [!TIP]
 > Troubleshooting checklist:
 > - Verify I2C is enabled: `sudo i2cdetect -y 0` or `sudo i2cdetect -y 1`
-> - Check if device appears at address 0x3C
+> - Check if device appears at address 0x3C or 0x3D
 > - Verify wiring connections (SDA, SCL, VCC, GND)
 > - Check service logs: `sudo journalctl -u oled_display.service -f`
+> - Verify correct driver is selected (check logs for driver name)
+> - Try different driver if display shows garbled output
+
+**Wrong driver selected:**
+
+> [!TIP]
+> If the display shows garbled output or doesn't work:
+> - Check which driver your display uses (consult display documentation)
+> - Common 0.96" displays use SSD1306
+> - Common 1.3" displays use SH1106
+> - Update driver: `sudo nano /etc/default/oled_display` and change `OLED_DRIVER`
+> - Restart service: `sudo systemctl restart oled_display.service`
 
 **Wrong I2C bus:**
 
