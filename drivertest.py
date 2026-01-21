@@ -92,7 +92,6 @@ def init_display():
     # Import required libraries
     try:
         import busio
-        from PIL import Image, ImageDraw, ImageFont
     except ImportError as e:
         print(f"Error: Required library not available: {e}", file=sys.stderr)
         print("Please install: pip3 install --user adafruit-blinka Pillow", file=sys.stderr)
@@ -140,6 +139,12 @@ def init_display():
     print(f"Initializing {DRIVER_NAME.upper()} display...")
     try:
         driver_class_name = f"{DRIVER_NAME.upper()}_I2C"
+        # Check if the driver class exists
+        if not hasattr(driver_module, driver_class_name):
+            print(f"Error: Driver class '{driver_class_name}' not found in module", file=sys.stderr)
+            print(f"Available classes in module: {[attr for attr in dir(driver_module) if not attr.startswith('_')]}", file=sys.stderr)
+            sys.exit(1)
+        
         driver_class = getattr(driver_module, driver_class_name)
         oled = driver_class(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
     except Exception as e:

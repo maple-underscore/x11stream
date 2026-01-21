@@ -5,6 +5,8 @@
 #
 
 set -e  # Exit on error
+set -u  # Exit on undefined variables
+set -o pipefail  # Catch errors in pipelines
 
 # Colors for output
 RED='\033[0;31m'
