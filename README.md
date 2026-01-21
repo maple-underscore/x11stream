@@ -362,6 +362,90 @@ Edit `/usr/local/bin/oled_display.py` and change the default values.
 > - For manual configuration, check which I2C bus your display is on with `i2cdetect`
 > - You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
 
+## Maintenance and Testing
+
+### Updating the Repository
+
+The `update.sh` script allows you to easily update your x11stream installation to the latest version:
+
+```bash
+./update.sh
+```
+
+The update script will:
+- Check for uncommitted changes and offer to stash them
+- Fetch the latest changes from the remote repository
+- Pull and merge updates to your current branch
+- Notify you if `requirements.txt` or service files were updated
+- Provide instructions for updating dependencies or reloading services if needed
+
+### Testing OLED Drivers
+
+The `drivertest.py` script allows you to test OLED displays with custom configurations without modifying the main display service.
+
+#### Configuration
+
+Edit the configuration section at the top of `drivertest.py`:
+
+```python
+# OLED Driver Selection
+DRIVER_NAME = "sh1106"  # sh1106, ssd1306, ssd1305, or ssd1309
+
+# Text to display
+DISPLAY_TEXT = "Hello World!"
+
+# I2C Interface Selection
+I2C_SDA_PIN = "I2C2_SDA_M0"  # Orange Pi: I2C2_SDA_M0, I2C0_SDA
+I2C_SCL_PIN = "I2C2_SCL_M0"  # Raspberry Pi: GPIO2 (SDA), GPIO3 (SCL), or SDA/SCL
+
+# I2C Address
+I2C_ADDRESS = 0x3C  # Most displays use 0x3C or 0x3D
+```
+
+#### Usage
+
+```bash
+# Run the driver test
+python3 drivertest.py
+```
+
+The script will:
+- Display configuration information (driver, text, I2C pins)
+- Initialize the selected OLED driver
+- Clear the display
+- Show your custom text
+- Keep the display on until you press Ctrl+C
+
+#### Use Cases
+
+- **Test different drivers**: Quickly test which driver works with your display
+- **Test different I2C interfaces**: Verify correct pin configuration
+- **Custom messages**: Display any text on your OLED for testing
+- **Troubleshooting**: Isolate display issues from the main service
+
+#### Example Configurations
+
+**Orange Pi 5 with 1.3" SH1106 display:**
+```python
+DRIVER_NAME = "sh1106"
+I2C_SDA_PIN = "I2C2_SDA_M0"
+I2C_SCL_PIN = "I2C2_SCL_M0"
+```
+
+**Raspberry Pi with 0.96" SSD1306 display:**
+```python
+DRIVER_NAME = "ssd1306"
+I2C_SDA_PIN = "SDA"  # or "GPIO2"
+I2C_SCL_PIN = "SCL"  # or "GPIO3"
+```
+
+**Custom I2C bus:**
+```python
+DRIVER_NAME = "ssd1309"
+I2C_SDA_PIN = "I2C0_SDA"
+I2C_SCL_PIN = "I2C0_SCL"
+```
+
 ## Configuration
 
 ### Environment Variables
