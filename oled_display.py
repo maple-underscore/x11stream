@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 OLED Display Management for Orange Pi
-Displays local IP address and streaming status on SSD1306 OLED display
+Displays local IP address and streaming status on OLED display
+Supports multiple drivers: SSD1306, SH1106, SSD1305, SSD1309
 Connected via I2C (I2C_SDA_M0 and I2C_SCL_M0 pins)
 """
 
@@ -22,22 +23,55 @@ except (ImportError, NotImplementedError) as e:
 
 from PIL import Image, ImageDraw, ImageFont
 
-# Import Adafruit SSD1306 library
+# Import Adafruit OLED libraries
+DRIVER_MODULES = {}
 try:
     import adafruit_ssd1306
-except ImportError as e:
-    print(f"Error: Adafruit SSD1306 library not available: {e}", file=sys.stderr)
-    print("Please install: sudo pip3 install adafruit-circuitpython-ssd1306", file=sys.stderr)
+    DRIVER_MODULES['ssd1306'] = adafruit_ssd1306
+except ImportError:
+    pass
+
+try:
+    import adafruit_sh1106
+    DRIVER_MODULES['sh1106'] = adafruit_sh1106
+except ImportError:
+    pass
+
+try:
+    import adafruit_ssd1305
+    DRIVER_MODULES['ssd1305'] = adafruit_ssd1305
+except ImportError:
+    pass
+
+try:
+    import adafruit_ssd1309
+    DRIVER_MODULES['ssd1309'] = adafruit_ssd1309
+except ImportError:
+    pass
+
+if not DRIVER_MODULES:
+    print("Error: No OLED driver libraries available", file=sys.stderr)
+    print("Please install at least one of:", file=sys.stderr)
+    print("  sudo pip3 install adafruit-circuitpython-ssd1306", file=sys.stderr)
+    print("  sudo pip3 install adafruit-circuitpython-sh1106", file=sys.stderr)
+    print("  sudo pip3 install adafruit-circuitpython-ssd1305", file=sys.stderr)
+    print("  sudo pip3 install adafruit-circuitpython-ssd1309", file=sys.stderr)
     sys.exit(1)
 
 # Display dimensions
 WIDTH = 128
 HEIGHT = 64
 
-# I2C address (default for SSD1306)
-# Most SSD1306 displays use 0x3C, but some use 0x3D
+# OLED Driver Selection
+# Set OLED_DRIVER environment variable to choose driver
+# Supported: ssd1306, sh1106, ssd1305, ssd1309
+# Default: sh1106 (as requested in requirements)
+OLED_DRIVER = os.environ.get('OLED_DRIVER', 'sh1106').lower()
+
+# I2C address (default for most OLED displays)
+# Most OLED displays use 0x3C, but some use 0x3D
 # To change: set I2C_ADDRESS environment variable or modify this value
-I2C_ADDRESS = 0x3C
+I2C_ADDRESS = int(os.environ.get('I2C_ADDRESS', '0x3C'), 16)
 
 def get_local_ip():
     """Get the local IP address of the machine.
@@ -192,16 +226,38 @@ def check_i2c_available():
 def init_display():
     """Initialize the I2C connection and OLED display."""
     try:
+        # Validate driver selection
+        if OLED_DRIVER not in DRIVER_MODULES:
+            available = ', '.join(DRIVER_MODULES.keys())
+            print(f"Error: Unsupported driver '{OLED_DRIVER}'", file=sys.stderr)
+            print(f"Available drivers: {available}", file=sys.stderr)
+            return None
+        
+        print(f"Initializing {OLED_DRIVER.upper()} display at I2C address 0x{I2C_ADDRESS:02X}...")
+        
         # Create I2C bus using board pins
         i2c = busio.I2C(SCL, SDA)
         
-        # Create the SSD1306 OLED class
-        # 128x64 display with I2C address
-        oled = adafruit_ssd1306.SSD1306_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
+        # Create the OLED display class based on driver selection
+        driver_module = DRIVER_MODULES[OLED_DRIVER]
+        
+        if OLED_DRIVER == 'ssd1306':
+            oled = driver_module.SSD1306_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
+        elif OLED_DRIVER == 'sh1106':
+            oled = driver_module.SH1106_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
+        elif OLED_DRIVER == 'ssd1305':
+            oled = driver_module.SSD1305_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
+        elif OLED_DRIVER == 'ssd1309':
+            oled = driver_module.SSD1309_I2C(WIDTH, HEIGHT, i2c, addr=I2C_ADDRESS)
+        else:
+            print(f"Error: Driver '{OLED_DRIVER}' not implemented", file=sys.stderr)
+            return None
         
         # Clear display
         oled.fill(0)
         oled.show()
+        
+        print(f"✓ {OLED_DRIVER.upper()} display initialized successfully")
         
         return oled
     except Exception as e:

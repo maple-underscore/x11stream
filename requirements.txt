@@ -1,2 +1,7 @@
-adafruit-circuitpython-ssd1306
+# OLED Display Driver Libraries
+# Install at least one of the following drivers based on your display hardware:
+adafruit-circuitpython-ssd1306   # For SSD1306 displays
+adafruit-circuitpython-sh1106    # For SH1106 displays (default)
+adafruit-circuitpython-ssd1305   # For SSD1305 displays
+adafruit-circuitpython-ssd1309   # For SSD1309 displays
 Pillow
