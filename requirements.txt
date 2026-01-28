@@ -5,3 +5,7 @@ adafruit-circuitpython-sh1106    # For SH1106 displays (default)
 adafruit-circuitpython-ssd1305   # For SSD1305 displays
 adafruit-circuitpython-ssd1309   # For SSD1309 displays
 Pillow
+
+# USB-to-I2C Bridge Libraries
+cp2112                           # CP2112 USB-to-I2C bridge support
+adafruit-circuitpython-tca9548a  # TCA9548A I2C multiplexer support

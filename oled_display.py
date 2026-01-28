@@ -3,7 +3,7 @@
 OLED Display Management for Orange Pi
 Displays local IP address and streaming status on OLED display
 Supports multiple drivers: SSD1306, SH1106, SSD1305, SSD1309
-Connected via I2C (I2C_SDA_M0 and I2C_SCL_M0 pins)
+Connected via CP2112 USB-to-I2C bridge with optional TCA9548A multiplexer
 """
 
 import time
@@ -12,13 +12,12 @@ import subprocess
 import glob
 import os
 
-# Import board library for I2C pin definitions
+# Import CP2112 library for USB-to-I2C communication
 try:
-    from board import SCL, SDA
-    import busio
-except (ImportError, NotImplementedError) as e:
-    print(f"Error: CircuitPython board library not available: {e}", file=sys.stderr)
-    print("Please install: sudo pip3 install adafruit-blinka", file=sys.stderr)
+    import cp2112
+except ImportError as e:
+    print(f"Error: CP2112 library not available: {e}", file=sys.stderr)
+    print("Please install: pip3 install cp2112", file=sys.stderr)
     sys.exit(1)
 
 from PIL import Image, ImageDraw, ImageFont
@@ -72,6 +71,13 @@ OLED_DRIVER = os.environ.get('OLED_DRIVER', 'sh1106').lower()
 # Most OLED displays use 0x3C, but some use 0x3D
 # To change: set I2C_ADDRESS environment variable or modify this value
 I2C_ADDRESS = int(os.environ.get('I2C_ADDRESS', '0x3C'), 16)
+
+# TCA9548A multiplexer configuration
+# Set USE_MULTIPLEXER environment variable to 'true' to enable TCA9548A support
+# Set MULTIPLEXER_CHANNEL to select the channel (0-7) where the OLED is connected
+USE_MULTIPLEXER = os.environ.get('USE_MULTIPLEXER', 'false').lower() in ('true', '1', 'yes')
+MULTIPLEXER_ADDRESS = int(os.environ.get('MULTIPLEXER_ADDRESS', '0x70'), 16)
+MULTIPLEXER_CHANNEL = int(os.environ.get('MULTIPLEXER_CHANNEL', '0'))
 
 def get_local_ip():
     """Get the local IP address of the machine.
@@ -161,70 +167,40 @@ def get_stream_status():
     return "Unknown"
 
 def check_i2c_available():
-    """Check if I2C is available and detect I2C buses.
+    """Check if CP2112 USB-to-I2C bridge is available.
     
     Performs diagnostic checks:
-    1. Checks for /dev/i2c-* device nodes
-    2. Attempts to detect I2C device using i2cdetect
-    3. Provides helpful error messages if I2C is not configured
+    1. Checks for CP2112 USB devices
+    2. Provides helpful error messages if CP2112 is not found
     
     Returns:
-        bool: True if I2C appears to be available, False otherwise
+        bool: True if CP2112 appears to be available, False otherwise
     """
-    print("Performing I2C auto-check...")
+    print("Performing CP2112 USB-to-I2C auto-check...")
     
-    # Check for I2C device nodes
-    i2c_devices = glob.glob('/dev/i2c-*')
-    
-    if not i2c_devices:
-        print("Error: No I2C device nodes found under /dev/", file=sys.stderr)
-        print("I2C may not be enabled. Please enable I2C:", file=sys.stderr)
-        print("  - Use: sudo armbian-config -> System -> Hardware -> enable i2c0 or i2c1", file=sys.stderr)
-        print("  - Or manually edit /boot/orangepiEnv.txt and add: overlays=i2c0", file=sys.stderr)
-        print("  - Then reboot the system", file=sys.stderr)
-        return False
-    
-    print(f"✓ Found I2C device nodes: {', '.join(i2c_devices)}")
-    
-    # Try to detect the I2C device using i2cdetect
-    i2c_found = False
-    for device in i2c_devices:
-        # Extract bus number from /dev/i2c-N
-        bus_num = device.split('-')[-1]
+    # Check for CP2112 devices
+    try:
+        devices = cp2112.find_devices()
+        if not devices:
+            print("Error: No CP2112 USB-to-I2C bridge devices found", file=sys.stderr)
+            print("Please check:", file=sys.stderr)
+            print("  - CP2112 device is connected via USB", file=sys.stderr)
+            print("  - USB device permissions are correct (may need udev rules)", file=sys.stderr)
+            print("  - Device is not in use by another application", file=sys.stderr)
+            return False
         
-        try:
-            # Run i2cdetect to scan the I2C bus
-            # -y: disable interactive mode
-            result = subprocess.run(
-                ["i2cdetect", "-y", bus_num],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                # Check if our I2C address (0x3C or 0x3D) appears in the output
-                output = result.stdout.lower()
-                if '3c' in output or '3d' in output:
-                    print(f"✓ I2C device detected on bus {bus_num} at address 0x3C or 0x3D")
-                    i2c_found = True
-                    break
-        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
-            # i2cdetect may not be available or may require permissions
-            print(f"Warning: Could not run i2cdetect on bus {bus_num}: {e}", file=sys.stderr)
-    
-    if not i2c_found:
-        print("Warning: Could not automatically detect SSD1306 device (0x3C/0x3D)", file=sys.stderr)
-        print("This may be normal if:", file=sys.stderr)
-        print("  - The display is not yet connected", file=sys.stderr)
-        print("  - i2cdetect requires sudo permissions", file=sys.stderr)
-        print("  - The device is on a different I2C bus", file=sys.stderr)
-        print("Continuing with initialization attempt...", file=sys.stderr)
-    
-    return True  # Return True if device nodes exist, even if detection fails
+        print(f"✓ Found {len(devices)} CP2112 USB-to-I2C bridge device(s)")
+        for i, device in enumerate(devices):
+            print(f"  Device {i}: {device}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error checking for CP2112 devices: {e}", file=sys.stderr)
+        return False
 
 def init_display():
-    """Initialize the I2C connection and OLED display."""
+    """Initialize the CP2112 USB-to-I2C connection and OLED display."""
     try:
         # Validate driver selection
         if OLED_DRIVER not in DRIVER_MODULES:
@@ -235,8 +211,93 @@ def init_display():
         
         print(f"Initializing {OLED_DRIVER.upper()} display at I2C address 0x{I2C_ADDRESS:02X}...")
         
-        # Create I2C bus using board pins
-        i2c = busio.I2C(SCL, SDA)
+        # Find and open CP2112 device
+        devices = cp2112.find_devices()
+        if not devices:
+            print("Error: No CP2112 USB-to-I2C bridge devices found", file=sys.stderr)
+            return None
+        
+        # Use the first available CP2112 device
+        device_path = devices[0]
+        print(f"Using CP2112 device: {device_path}")
+        
+        # Create CP2112 device instance
+        i2c_device = cp2112.CP2112Device(device_path)
+        
+        # Configure I2C speed (100kHz is standard for most OLED displays)
+        i2c_device.set_smbus_config(clock_speed=100000)
+        
+        # If using TCA9548A multiplexer, select the appropriate channel
+        multiplexer = None
+        if USE_MULTIPLEXER:
+            try:
+                import adafruit_tca9548a
+                print(f"Using TCA9548A multiplexer at address 0x{MULTIPLEXER_ADDRESS:02X}, channel {MULTIPLEXER_CHANNEL}")
+                
+                # Create a minimal I2C bus wrapper for the CP2112
+                class CP2112I2CBus:
+                    """Minimal I2C bus wrapper for CP2112 to work with Adafruit libraries."""
+                    def __init__(self, cp2112_device):
+                        self.device = cp2112_device
+                    
+                    def writeto(self, address, buffer, **kwargs):
+                        """Write data to I2C device."""
+                        self.device.write(address, bytes(buffer))
+                    
+                    def readfrom_into(self, address, buffer, **kwargs):
+                        """Read data from I2C device into buffer."""
+                        data = self.device.read(address, len(buffer))
+                        for i, byte in enumerate(data):
+                            buffer[i] = byte
+                    
+                    def try_lock(self):
+                        """Try to lock the bus (always succeeds for CP2112)."""
+                        return True
+                    
+                    def unlock(self):
+                        """Unlock the bus (no-op for CP2112)."""
+                        pass
+                    
+                    def scan(self):
+                        """Scan I2C bus for devices."""
+                        # CP2112 doesn't have a built-in scan, so we'll try common addresses
+                        found = []
+                        for addr in range(0x08, 0x78):
+                            try:
+                                self.device.read(addr, 1)
+                                found.append(addr)
+                            except:
+                                pass
+                        return found
+                
+                i2c_bus = CP2112I2CBus(i2c_device)
+                multiplexer = adafruit_tca9548a.TCA9548A(i2c_bus, address=MULTIPLEXER_ADDRESS)
+                i2c = multiplexer[MULTIPLEXER_CHANNEL]
+            except ImportError:
+                print("Warning: TCA9548A support requested but library not installed", file=sys.stderr)
+                print("Install with: pip3 install adafruit-circuitpython-tca9548a", file=sys.stderr)
+                print("Continuing without multiplexer...", file=sys.stderr)
+                USE_MULTIPLEXER = False
+        
+        # If not using multiplexer or multiplexer setup failed, use CP2112 directly
+        if not USE_MULTIPLEXER or multiplexer is None:
+            # Create a minimal I2C bus wrapper for CP2112 to work with Adafruit OLED libraries
+            class CP2112I2CBus:
+                """Minimal I2C bus wrapper for CP2112 to work with Adafruit libraries."""
+                def __init__(self, cp2112_device):
+                    self.device = cp2112_device
+                
+                def writeto(self, address, buffer, **kwargs):
+                    """Write data to I2C device."""
+                    self.device.write(address, bytes(buffer))
+                
+                def readfrom_into(self, address, buffer, **kwargs):
+                    """Read data from I2C device into buffer."""
+                    data = self.device.read(address, len(buffer))
+                    for i, byte in enumerate(data):
+                        buffer[i] = byte
+            
+            i2c = CP2112I2CBus(i2c_device)
         
         # Create the OLED display class based on driver selection
         driver_module = DRIVER_MODULES[OLED_DRIVER]
@@ -256,6 +317,8 @@ def init_display():
         return oled
     except Exception as e:
         print(f"Error initializing display: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         return None
 
 def display_info(oled, ip_address, status):
