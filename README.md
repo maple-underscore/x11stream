@@ -192,11 +192,16 @@ lsusb | grep "10c4:ea90"  # Should show Silicon Labs CP2112 HID SMBus Bridge
 # Set up udev rules for non-root access (optional but recommended)
 sudo tee /etc/udev/rules.d/99-cp2112.rules << EOF
 # CP2112 HID USB-to-SMBus Bridge
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea90", MODE="0666"
+# Add user to plugdev group for access: sudo usermod -a -G plugdev \$USER
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea90", GROUP="plugdev", MODE="0660"
 EOF
 
 sudo udevadm control --reload-rules
 sudo udevadm trigger
+
+# Add your user to the plugdev group (replace $USER with your username if needed)
+sudo usermod -a -G plugdev $USER
+# Note: You'll need to log out and back in for group membership to take effect
 ```
 
 2. **Connect hardware**:

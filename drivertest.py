@@ -67,6 +67,14 @@ def init_display():
         print("Please install: pip3 install cp2112", file=sys.stderr)
         sys.exit(1)
     
+    # Import CP2112 I2C bus wrapper
+    try:
+        from cp2112_i2c_bus import CP2112I2CBus
+    except ImportError as e:
+        print(f"Error: CP2112 I2C bus wrapper not available: {e}", file=sys.stderr)
+        print("Please ensure cp2112_i2c_bus.py is in the same directory", file=sys.stderr)
+        sys.exit(1)
+    
     # Find and open CP2112 device
     print(f"Searching for CP2112 USB-to-I2C bridge...")
     devices = cp2112.find_devices()
@@ -90,44 +98,13 @@ def init_display():
         sys.exit(1)
     
     # If using multiplexer, set it up
-    multiplexer = None
+    i2c = None
     if USE_MULTIPLEXER:
         try:
             import adafruit_tca9548a
             print(f"Initializing TCA9548A multiplexer...")
             
-            # Create I2C bus wrapper for CP2112
-            class CP2112I2CBus:
-                """Minimal I2C bus wrapper for CP2112 to work with Adafruit libraries."""
-                def __init__(self, cp2112_device):
-                    self.device = cp2112_device
-                
-                def writeto(self, address, buffer, **kwargs):
-                    """Write data to I2C device."""
-                    self.device.write(address, bytes(buffer))
-                
-                def readfrom_into(self, address, buffer, **kwargs):
-                    """Read data from I2C device into buffer."""
-                    data = self.device.read(address, len(buffer))
-                    for i, byte in enumerate(data):
-                        buffer[i] = byte
-                
-                def try_lock(self):
-                    return True
-                
-                def unlock(self):
-                    pass
-                
-                def scan(self):
-                    found = []
-                    for addr in range(0x08, 0x78):
-                        try:
-                            self.device.read(addr, 1)
-                            found.append(addr)
-                        except:
-                            pass
-                    return found
-            
+            # Create I2C bus wrapper and multiplexer
             i2c_bus = CP2112I2CBus(i2c_device)
             multiplexer = adafruit_tca9548a.TCA9548A(i2c_bus, address=MULTIPLEXER_ADDRESS)
             i2c = multiplexer[MULTIPLEXER_CHANNEL]
@@ -139,23 +116,9 @@ def init_display():
         except Exception as e:
             print(f"Error initializing TCA9548A multiplexer: {e}", file=sys.stderr)
             sys.exit(1)
-    else:
-        # Create I2C bus wrapper for CP2112
-        class CP2112I2CBus:
-            """Minimal I2C bus wrapper for CP2112 to work with Adafruit libraries."""
-            def __init__(self, cp2112_device):
-                self.device = cp2112_device
-            
-            def writeto(self, address, buffer, **kwargs):
-                """Write data to I2C device."""
-                self.device.write(address, bytes(buffer))
-            
-            def readfrom_into(self, address, buffer, **kwargs):
-                """Read data from I2C device into buffer."""
-                data = self.device.read(address, len(buffer))
-                for i, byte in enumerate(data):
-                    buffer[i] = byte
-        
+    
+    # If not using multiplexer or multiplexer setup failed, use CP2112 directly
+    if i2c is None:
         i2c = CP2112I2CBus(i2c_device)
     
     # Import the driver module

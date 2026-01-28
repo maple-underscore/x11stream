@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-OLED Display Management for Orange Pi
+OLED Display Management
 Displays local IP address and streaming status on OLED display
 Supports multiple drivers: SSD1306, SH1106, SSD1305, SSD1309
 Connected via CP2112 USB-to-I2C bridge with optional TCA9548A multiplexer
+
+Works on any system with USB support (Linux, Orange Pi, Raspberry Pi, etc.)
 """
 
 import time
@@ -18,6 +20,14 @@ try:
 except ImportError as e:
     print(f"Error: CP2112 library not available: {e}", file=sys.stderr)
     print("Please install: pip3 install cp2112", file=sys.stderr)
+    sys.exit(1)
+
+# Import CP2112 I2C bus wrapper
+try:
+    from cp2112_i2c_bus import CP2112I2CBus
+except ImportError as e:
+    print(f"Error: CP2112 I2C bus wrapper not available: {e}", file=sys.stderr)
+    print("Please ensure cp2112_i2c_bus.py is in the same directory", file=sys.stderr)
     sys.exit(1)
 
 from PIL import Image, ImageDraw, ImageFont
@@ -228,48 +238,13 @@ def init_display():
         i2c_device.set_smbus_config(clock_speed=100000)
         
         # If using TCA9548A multiplexer, select the appropriate channel
-        multiplexer = None
+        i2c = None
         if USE_MULTIPLEXER:
             try:
                 import adafruit_tca9548a
                 print(f"Using TCA9548A multiplexer at address 0x{MULTIPLEXER_ADDRESS:02X}, channel {MULTIPLEXER_CHANNEL}")
                 
-                # Create a minimal I2C bus wrapper for the CP2112
-                class CP2112I2CBus:
-                    """Minimal I2C bus wrapper for CP2112 to work with Adafruit libraries."""
-                    def __init__(self, cp2112_device):
-                        self.device = cp2112_device
-                    
-                    def writeto(self, address, buffer, **kwargs):
-                        """Write data to I2C device."""
-                        self.device.write(address, bytes(buffer))
-                    
-                    def readfrom_into(self, address, buffer, **kwargs):
-                        """Read data from I2C device into buffer."""
-                        data = self.device.read(address, len(buffer))
-                        for i, byte in enumerate(data):
-                            buffer[i] = byte
-                    
-                    def try_lock(self):
-                        """Try to lock the bus (always succeeds for CP2112)."""
-                        return True
-                    
-                    def unlock(self):
-                        """Unlock the bus (no-op for CP2112)."""
-                        pass
-                    
-                    def scan(self):
-                        """Scan I2C bus for devices."""
-                        # CP2112 doesn't have a built-in scan, so we'll try common addresses
-                        found = []
-                        for addr in range(0x08, 0x78):
-                            try:
-                                self.device.read(addr, 1)
-                                found.append(addr)
-                            except:
-                                pass
-                        return found
-                
+                # Create I2C bus wrapper and multiplexer
                 i2c_bus = CP2112I2CBus(i2c_device)
                 multiplexer = adafruit_tca9548a.TCA9548A(i2c_bus, address=MULTIPLEXER_ADDRESS)
                 i2c = multiplexer[MULTIPLEXER_CHANNEL]
@@ -277,26 +252,14 @@ def init_display():
                 print("Warning: TCA9548A support requested but library not installed", file=sys.stderr)
                 print("Install with: pip3 install adafruit-circuitpython-tca9548a", file=sys.stderr)
                 print("Continuing without multiplexer...", file=sys.stderr)
-                USE_MULTIPLEXER = False
+                # Fall through to use CP2112 directly
+            except Exception as e:
+                print(f"Warning: Failed to initialize TCA9548A multiplexer: {e}", file=sys.stderr)
+                print("Continuing without multiplexer...", file=sys.stderr)
+                # Fall through to use CP2112 directly
         
         # If not using multiplexer or multiplexer setup failed, use CP2112 directly
-        if not USE_MULTIPLEXER or multiplexer is None:
-            # Create a minimal I2C bus wrapper for CP2112 to work with Adafruit OLED libraries
-            class CP2112I2CBus:
-                """Minimal I2C bus wrapper for CP2112 to work with Adafruit libraries."""
-                def __init__(self, cp2112_device):
-                    self.device = cp2112_device
-                
-                def writeto(self, address, buffer, **kwargs):
-                    """Write data to I2C device."""
-                    self.device.write(address, bytes(buffer))
-                
-                def readfrom_into(self, address, buffer, **kwargs):
-                    """Read data from I2C device into buffer."""
-                    data = self.device.read(address, len(buffer))
-                    for i, byte in enumerate(data):
-                        buffer[i] = byte
-            
+        if i2c is None:
             i2c = CP2112I2CBus(i2c_device)
         
         # Create the OLED display class based on driver selection
