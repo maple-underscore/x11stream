@@ -146,7 +146,7 @@ sudo journalctl -u x11stream.service -f
 
 ## OLED Display Support (Orange Pi / Raspberry Pi)
 
-The x11stream project supports displaying the local IP address and streaming status on I2C OLED displays with multiple driver options.
+The x11stream project supports displaying the local IP address and streaming status on I2C OLED displays with multiple driver options. The display connects via CP2112 USB-to-I2C bridge with optional TCA9548A multiplexer support.
 
 ### Supported OLED Drivers
 
@@ -157,11 +157,13 @@ The x11stream project supports displaying the local IP address and streaming sta
 
 ### Hardware Requirements
 
-- Orange Pi (tested on Orange Pi 5) or Raspberry Pi
+- Any system with USB port (Linux, Orange Pi, Raspberry Pi, etc.)
+- **CP2112 USB-to-I2C Bridge** - Silicon Labs USB to I2C/SMBus bridge
 - 0.96" - 1.3" OLED Display Module (128x64 pixels, I2C)
-- I2C connection using pins:
-  - `I2C_SDA_M0` (SDA/Data) or `GPIO2` (Raspberry Pi)
-  - `I2C_SCL_M0` (SCL/Clock) or `GPIO3` (Raspberry Pi)
+- **Optional**: TCA9548A I2C Multiplexer (if you need to connect multiple I2C devices)
+- I2C connection from CP2112 to OLED:
+  - SDA (Data)
+  - SCL (Clock)
   - VCC (3.3V-5V)
   - GND
 
@@ -179,39 +181,44 @@ When prompted, choose to install OLED support and select your driver type.
 
 #### Manual Installation
 
-1. **Enable I2C on Orange Pi**:
+1. **Connect CP2112 USB-to-I2C Bridge**:
 ```bash
-# Install I2C tools and Python package manager
-sudo apt-get install -y i2c-tools python3-pip
+# Connect CP2112 to your system via USB
+# The device should appear as a HID device (no driver installation needed on Linux)
 
-# Enable I2C using armbian-config (recommended method for Armbian-based systems)
-sudo armbian-config
-# Navigate to: System -> Hardware -> enable i2c0 or i2c1
-# Save and reboot
+# Verify CP2112 device is detected
+lsusb | grep "10c4:ea90"  # Should show Silicon Labs CP2112 HID SMBus Bridge
 
-# Alternative: For manual configuration, you can edit /boot/orangepiEnv.txt
-# Add or uncomment the following line:
-# overlays=i2c0
-# Then reboot the system
+# Set up udev rules for non-root access (optional but recommended)
+sudo tee /etc/udev/rules.d/99-cp2112.rules << EOF
+# CP2112 HID USB-to-SMBus Bridge
+# Add user to plugdev group for access: sudo usermod -a -G plugdev \$USER
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea90", GROUP="plugdev", MODE="0660"
+EOF
+
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+# Add your user to the plugdev group (replace $USER with your username if needed)
+sudo usermod -a -G plugdev $USER
+# Note: You'll need to log out and back in for group membership to take effect
 ```
 
-**For Raspberry Pi**:
+2. **Connect hardware**:
 ```bash
-# Install I2C tools
-sudo apt-get install -y i2c-tools python3-pip
+# Wire the OLED display to CP2112:
+# - OLED VCC to 3.3V or 5V (depending on your OLED)
+# - OLED GND to GND
+# - OLED SDA to CP2112 SDA
+# - OLED SCL to CP2112 SCL
 
-# Enable I2C
-sudo raspi-config
-# Navigate to: Interface Options -> I2C -> Enable
-# Reboot the system
-```
-
-2. **Verify I2C connection**:
-```bash
-# Check if I2C device is detected (default address: 0x3C)
-sudo i2cdetect -y 0  # Try bus 0
-# or
-sudo i2cdetect -y 1  # Try bus 1
+# If using TCA9548A multiplexer:
+# - TCA9548A VCC to 3.3V or 5V
+# - TCA9548A GND to GND
+# - TCA9548A SDA to CP2112 SDA
+# - TCA9548A SCL to CP2112 SCL
+# - OLED SDA to one of TCA9548A SD0-SD7
+# - OLED SCL to corresponding TCA9548A SC0-SC7
 ```
 
 3. **Install Python dependencies**:
@@ -222,8 +229,8 @@ sudo i2cdetect -y 1  # Try bus 1
 ```bash
 cd x11stream
 
-# Install base dependencies
-pip3 install --user adafruit-blinka Pillow
+# Install CP2112 and base dependencies
+pip3 install --user cp2112 Pillow
 
 # Install driver for your display (choose one or install all):
 pip3 install --user adafruit-circuitpython-sh1106   # For SH1106 (default)
@@ -231,13 +238,16 @@ pip3 install --user adafruit-circuitpython-ssd1306  # For SSD1306
 pip3 install --user adafruit-circuitpython-ssd1305  # For SSD1305
 pip3 install --user adafruit-circuitpython-ssd1309  # For SSD1309
 
-# Or install all drivers at once:
+# Optional: Install TCA9548A multiplexer support
+pip3 install --user adafruit-circuitpython-tca9548a
+
+# Or install all dependencies at once:
 pip3 install --user -r requirements.txt
 ```
 
-4. **Configure OLED driver** (optional):
+4. **Configure OLED driver and multiplexer** (optional):
 
-Set the driver type and I2C address via environment variables:
+Set the driver type, I2C address, and multiplexer settings via environment variables:
 
 ```bash
 # Create environment file
@@ -245,15 +255,21 @@ sudo mkdir -p /etc/default
 sudo bash -c 'cat > /etc/default/oled_display << EOF
 OLED_DRIVER=sh1106
 I2C_ADDRESS=0x3C
+# Optional: Enable TCA9548A multiplexer
+USE_MULTIPLEXER=false
+MULTIPLEXER_ADDRESS=0x70
+MULTIPLEXER_CHANNEL=0
 EOF'
 ```
 
 Available drivers: `sh1106` (default), `ssd1306`, `ssd1305`, `ssd1309`
 
-5. **Install OLED display script**:
+5. **Install OLED display scripts**:
 ```bash
 sudo cp oled_display.py /usr/local/bin/
+sudo cp cp2112_i2c_bus.py /usr/local/bin/
 sudo chmod +x /usr/local/bin/oled_display.py
+sudo chmod +x /usr/local/bin/cp2112_i2c_bus.py
 ```
 
 6. **Install and enable the OLED display service**:
@@ -292,32 +308,37 @@ The OLED display shows:
 - **IP Address**: Current local IP address (updates every 5 seconds)
 - **Status**: Streaming status ("Streaming", "Stopped", or "Unknown")
 
-### I2C Auto-Check Feature
+### CP2112 USB-to-I2C Auto-Check Feature
 
 > [!NOTE]
-> The script automatically performs I2C diagnostics on startup:
-> - **Checks for I2C device nodes**: Verifies `/dev/i2c-*` devices exist
-> - **Scans I2C buses**: Uses `i2cdetect` to find OLED display at 0x3C or 0x3D
-> - **Provides helpful errors**: Clear guidance if I2C is not configured
+> The script automatically performs CP2112 USB-to-I2C diagnostics on startup:
+> - **Checks for CP2112 USB devices**: Verifies CP2112 bridge is connected and accessible
+> - **Initializes USB-to-I2C bridge**: Configures the CP2112 for I2C communication
+> - **Supports TCA9548A multiplexer**: Optionally uses I2C multiplexer for multiple devices
+> - **Provides helpful errors**: Clear guidance if CP2112 is not found or configured
 > - **Supports multiple drivers**: Auto-detects and uses the configured driver
 >
 > Example auto-check output:
 > ```
-> Performing I2C auto-check...
-> ✓ Found I2C device nodes: /dev/i2c-0, /dev/i2c-1
-> ✓ I2C device detected on bus 0 at address 0x3C or 0x3D
+> Performing CP2112 USB-to-I2C auto-check...
+> ✓ Found 1 CP2112 USB-to-I2C bridge device(s)
+>   Device 0: /dev/hidraw0
 > Initializing SH1106 display at I2C address 0x3C...
+> Using CP2112 device: /dev/hidraw0
 > ✓ SH1106 display initialized successfully
 > ```
 
 ### Driver Configuration
 
-You can configure the OLED driver in several ways:
+You can configure the OLED driver and multiplexer in several ways:
 
 1. **Environment variable** (recommended for systemd):
 ```bash
-export OLED_DRIVER=sh1106  # or ssd1306, ssd1305, ssd1309
-export I2C_ADDRESS=0x3C    # or 0x3D
+export OLED_DRIVER=sh1106         # or ssd1306, ssd1305, ssd1309
+export I2C_ADDRESS=0x3C           # or 0x3D
+export USE_MULTIPLEXER=false      # Set to true to enable TCA9548A
+export MULTIPLEXER_ADDRESS=0x70   # TCA9548A address (usually 0x70)
+export MULTIPLEXER_CHANNEL=0      # Channel 0-7 on TCA9548A
 ```
 
 2. **System-wide configuration file**:
@@ -325,6 +346,9 @@ export I2C_ADDRESS=0x3C    # or 0x3D
 # Create /etc/default/oled_display
 OLED_DRIVER=sh1106
 I2C_ADDRESS=0x3C
+USE_MULTIPLEXER=false
+MULTIPLEXER_ADDRESS=0x70
+MULTIPLEXER_CHANNEL=0
 ```
 
 3. **Edit the Python script directly** (not recommended):
@@ -336,12 +360,13 @@ Edit `/usr/local/bin/oled_display.py` and change the default values.
 
 > [!TIP]
 > Troubleshooting checklist:
-> - Verify I2C is enabled: `sudo i2cdetect -y 0` or `sudo i2cdetect -y 1`
-> - Check if device appears at address 0x3C or 0x3D
+> - Verify CP2112 is connected: `lsusb | grep "10c4:ea90"`
+> - Check USB device permissions (may need udev rules for non-root access)
 > - Verify wiring connections (SDA, SCL, VCC, GND)
 > - Check service logs: `sudo journalctl -u oled_display.service -f`
 > - Verify correct driver is selected (check logs for driver name)
 > - Try different driver if display shows garbled output
+> - If using TCA9548A, verify multiplexer address and channel settings
 
 **Wrong driver selected:**
 
@@ -353,14 +378,15 @@ Edit `/usr/local/bin/oled_display.py` and change the default values.
 > - Update driver: `sudo nano /etc/default/oled_display` and change `OLED_DRIVER`
 > - Restart service: `sudo systemctl restart oled_display.service`
 
-**Wrong I2C bus:**
+**CP2112 USB device not found:**
 
 > [!IMPORTANT]
-> The script uses `board.SCL` and `board.SDA`, which are the default I2C pins defined by the board library. They do not auto-detect alternate buses or pins.
+> The script uses CP2112 USB-to-I2C bridge for I2C communication. The CP2112 device should be automatically detected when connected via USB.
 >
-> - If you're using a different I2C bus, you may need to modify the Python script
-> - For manual configuration, check which I2C bus your display is on with `i2cdetect`
-> - You may need to modify the script to use a different I2C bus if your hardware differs from the default configuration
+> - If CP2112 is not detected, check USB connection and permissions
+> - You may need to set up udev rules for non-root access to the HID device
+> - If using TCA9548A multiplexer, ensure the multiplexer address and channel are configured correctly
+> - The multiplexer allows you to connect multiple I2C devices with the same address
 
 ## Maintenance and Testing
 
@@ -381,7 +407,7 @@ The update script will:
 
 ### Testing OLED Drivers
 
-The `drivertest.py` script allows you to test OLED displays with custom configurations without modifying the main display service.
+The `drivertest.py` script allows you to test OLED displays with CP2112 USB-to-I2C bridge and optional TCA9548A multiplexer without modifying the main display service.
 
 #### Configuration
 
@@ -394,12 +420,13 @@ DRIVER_NAME = "sh1106"  # sh1106, ssd1306, ssd1305, or ssd1309
 # Text to display
 DISPLAY_TEXT = "Hello World!"
 
-# I2C Interface Selection
-I2C_SDA_PIN = "I2C2_SDA_M0"  # Orange Pi: I2C2_SDA_M0, I2C0_SDA
-I2C_SCL_PIN = "I2C2_SCL_M0"  # Raspberry Pi: GPIO2 (SDA), GPIO3 (SCL), or SDA/SCL
-
 # I2C Address
 I2C_ADDRESS = 0x3C  # Most displays use 0x3C or 0x3D
+
+# TCA9548A Multiplexer Configuration
+USE_MULTIPLEXER = False          # Set to True to use TCA9548A multiplexer
+MULTIPLEXER_ADDRESS = 0x70       # I2C address of TCA9548A
+MULTIPLEXER_CHANNEL = 0          # Channel on TCA9548A (0-7)
 ```
 
 #### Usage
@@ -410,7 +437,9 @@ python3 drivertest.py
 ```
 
 The script will:
-- Display configuration information (driver, text, I2C pins)
+- Display configuration information (driver, text, multiplexer settings)
+- Detect and connect to CP2112 USB-to-I2C bridge
+- Initialize TCA9548A multiplexer if enabled
 - Initialize the selected OLED driver
 - Clear the display
 - Show your custom text
@@ -419,31 +448,39 @@ The script will:
 #### Use Cases
 
 - **Test different drivers**: Quickly test which driver works with your display
-- **Test different I2C interfaces**: Verify correct pin configuration
+- **Test CP2112 connection**: Verify USB-to-I2C bridge is working
+- **Test multiplexer**: Verify TCA9548A multiplexer configuration
 - **Custom messages**: Display any text on your OLED for testing
 - **Troubleshooting**: Isolate display issues from the main service
 
 #### Example Configurations
 
-**Orange Pi 5 with 1.3" SH1106 display:**
+**Standard setup with SH1106 display:**
 ```python
 DRIVER_NAME = "sh1106"
-I2C_SDA_PIN = "I2C2_SDA_M0"
-I2C_SCL_PIN = "I2C2_SCL_M0"
+I2C_ADDRESS = 0x3C
+USE_MULTIPLEXER = False
 ```
 
-**Raspberry Pi with 0.96" SSD1306 display:**
+**With TCA9548A multiplexer on channel 2:**
 ```python
 DRIVER_NAME = "ssd1306"
-I2C_SDA_PIN = "SDA"  # or "GPIO2"
-I2C_SCL_PIN = "SCL"  # or "GPIO3"
+I2C_ADDRESS = 0x3C
+USE_MULTIPLEXER = True
+MULTIPLEXER_ADDRESS = 0x70
+MULTIPLEXER_CHANNEL = 2
 ```
 
-**Custom I2C bus:**
+**Multiple displays on different channels:**
 ```python
-DRIVER_NAME = "ssd1309"
-I2C_SDA_PIN = "I2C0_SDA"
-I2C_SCL_PIN = "I2C0_SCL"
+# For display on channel 0
+DRIVER_NAME = "ssd1306"
+I2C_ADDRESS = 0x3C
+USE_MULTIPLEXER = True
+MULTIPLEXER_CHANNEL = 0
+
+# For display on channel 1 (edit and run again)
+# MULTIPLEXER_CHANNEL = 1
 ```
 
 ## Configuration

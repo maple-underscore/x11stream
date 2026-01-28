@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 OLED Driver Test Script
-Test OLED displays with custom driver, text, and I2C interface selection
+Test OLED displays with custom driver and CP2112 USB-to-I2C bridge
+Supports optional TCA9548A I2C multiplexer
 
 Usage:
     python3 drivertest.py
@@ -9,8 +10,10 @@ Usage:
 Configuration (edit the variables below):
     - DRIVER_NAME: sh1106, ssd1306, ssd1305, or ssd1309
     - DISPLAY_TEXT: Any text to display on the OLED
-    - I2C_SDA_PIN: I2C SDA pin name (e.g., I2C2_SDA_M0, SDA, GPIO2)
-    - I2C_SCL_PIN: I2C SCL pin name (e.g., I2C2_SCL_M0, SCL, GPIO3)
+    - I2C_ADDRESS: I2C address of the OLED display (usually 0x3C or 0x3D)
+    - USE_MULTIPLEXER: Set to True to use TCA9548A multiplexer
+    - MULTIPLEXER_ADDRESS: I2C address of TCA9548A (usually 0x70)
+    - MULTIPLEXER_CHANNEL: Channel on TCA9548A where OLED is connected (0-7)
 """
 
 import sys
@@ -27,18 +30,13 @@ DRIVER_NAME = "sh1106"
 # Text to display on the OLED
 DISPLAY_TEXT = "Hello World!"
 
-# I2C Interface Selection
-# Examples for Orange Pi:
-#   - I2C2_SDA_M0 and I2C2_SCL_M0
-#   - I2C0_SDA and I2C0_SCL
-# Examples for Raspberry Pi:
-#   - GPIO2 (SDA) and GPIO3 (SCL)
-#   - SDA and SCL (default)
-I2C_SDA_PIN = "I2C2_SDA_M0"
-I2C_SCL_PIN = "I2C2_SCL_M0"
-
 # I2C address (most OLED displays use 0x3C or 0x3D)
 I2C_ADDRESS = 0x3C
+
+# TCA9548A Multiplexer Configuration
+USE_MULTIPLEXER = False          # Set to True to use TCA9548A multiplexer
+MULTIPLEXER_ADDRESS = 0x70       # I2C address of TCA9548A
+MULTIPLEXER_CHANNEL = 0          # Channel on TCA9548A (0-7)
 
 # Display dimensions (standard for these drivers)
 WIDTH = 128
@@ -48,57 +46,80 @@ HEIGHT = 64
 # END CONFIGURATION
 # ============================================================================
 
-def setup_board_pins():
-    """Configure board library to use the specified I2C pins."""
-    import board
-    
-    # Get the actual pin objects from the pin names
-    try:
-        # Try to get the pin by name (e.g., I2C2_SDA_M0)
-        sda_pin = getattr(board, I2C_SDA_PIN, None)
-        scl_pin = getattr(board, I2C_SCL_PIN, None)
-        
-        if sda_pin is None:
-            print(f"Error: SDA pin '{I2C_SDA_PIN}' not found on board", file=sys.stderr)
-            print("Available pins:", file=sys.stderr)
-            available_pins = [p for p in dir(board) if not p.startswith('_')]
-            for i in range(0, len(available_pins), 8):
-                print("  " + ", ".join(available_pins[i:i+8]), file=sys.stderr)
-            sys.exit(1)
-        
-        if scl_pin is None:
-            print(f"Error: SCL pin '{I2C_SCL_PIN}' not found on board", file=sys.stderr)
-            print("Available pins:", file=sys.stderr)
-            available_pins = [p for p in dir(board) if not p.startswith('_')]
-            for i in range(0, len(available_pins), 8):
-                print("  " + ", ".join(available_pins[i:i+8]), file=sys.stderr)
-            sys.exit(1)
-        
-        return sda_pin, scl_pin
-    except AttributeError as e:
-        print(f"Error accessing board pins: {e}", file=sys.stderr)
-        sys.exit(1)
-
 def init_display():
-    """Initialize the OLED display with the configured driver and I2C pins."""
+    """Initialize the OLED display with CP2112 USB-to-I2C bridge."""
     print(f"OLED Driver Test")
     print(f"================")
     print(f"Driver: {DRIVER_NAME.upper()}")
     print(f"Text: '{DISPLAY_TEXT}'")
-    print(f"I2C Pins: SDA={I2C_SDA_PIN}, SCL={I2C_SCL_PIN}")
     print(f"I2C Address: 0x{I2C_ADDRESS:02X}")
+    if USE_MULTIPLEXER:
+        print(f"Multiplexer: TCA9548A at 0x{MULTIPLEXER_ADDRESS:02X}, channel {MULTIPLEXER_CHANNEL}")
+    else:
+        print(f"Multiplexer: Not used")
     print()
     
     # Import required libraries
     try:
-        import busio
+        import cp2112
     except ImportError as e:
-        print(f"Error: Required library not available: {e}", file=sys.stderr)
-        print("Please install: pip3 install --user adafruit-blinka Pillow", file=sys.stderr)
+        print(f"Error: CP2112 library not available: {e}", file=sys.stderr)
+        print("Please install: pip3 install cp2112", file=sys.stderr)
         sys.exit(1)
     
-    # Get I2C pins from board
-    sda_pin, scl_pin = setup_board_pins()
+    # Import CP2112 I2C bus wrapper
+    try:
+        from cp2112_i2c_bus import CP2112I2CBus
+    except ImportError as e:
+        print(f"Error: CP2112 I2C bus wrapper not available: {e}", file=sys.stderr)
+        print("Please ensure cp2112_i2c_bus.py is in the same directory or on the Python path", file=sys.stderr)
+        sys.exit(1)
+    
+    # Find and open CP2112 device
+    print(f"Searching for CP2112 USB-to-I2C bridge...")
+    devices = cp2112.find_devices()
+    if not devices:
+        print(f"Error: No CP2112 USB-to-I2C bridge devices found", file=sys.stderr)
+        print("Please check:", file=sys.stderr)
+        print("  - CP2112 device is connected via USB", file=sys.stderr)
+        print("  - USB device permissions are correct", file=sys.stderr)
+        sys.exit(1)
+    
+    device_path = devices[0]
+    print(f"✓ Found CP2112 device: {device_path}")
+    
+    # Create CP2112 device instance
+    try:
+        i2c_device = cp2112.CP2112Device(device_path)
+        i2c_device.set_smbus_config(clock_speed=100000)  # 100kHz
+        print(f"✓ CP2112 device initialized")
+    except Exception as e:
+        print(f"Error initializing CP2112 device: {e}", file=sys.stderr)
+        sys.exit(1)
+    
+    # If using multiplexer, set it up
+    i2c = None
+    if USE_MULTIPLEXER:
+        try:
+            import adafruit_tca9548a
+            print(f"Initializing TCA9548A multiplexer...")
+            
+            # Create I2C bus wrapper and multiplexer
+            i2c_bus = CP2112I2CBus(i2c_device)
+            multiplexer = adafruit_tca9548a.TCA9548A(i2c_bus, address=MULTIPLEXER_ADDRESS)
+            i2c = multiplexer[MULTIPLEXER_CHANNEL]
+            print(f"✓ TCA9548A multiplexer initialized on channel {MULTIPLEXER_CHANNEL}")
+        except ImportError:
+            print(f"Error: TCA9548A library not available", file=sys.stderr)
+            print("Please install: pip3 install adafruit-circuitpython-tca9548a", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error initializing TCA9548A multiplexer: {e}", file=sys.stderr)
+            sys.exit(1)
+    
+    # If not using multiplexer or multiplexer setup failed, use CP2112 directly
+    if i2c is None:
+        i2c = CP2112I2CBus(i2c_device)
     
     # Import the driver module
     try:
@@ -120,26 +141,13 @@ def init_display():
             sys.exit(1)
     except ImportError as e:
         print(f"Error: Driver module not available: {e}", file=sys.stderr)
-        print(f"Please install: pip3 install --user adafruit-circuitpython-{DRIVER_NAME}", file=sys.stderr)
-        sys.exit(1)
-    
-    # Initialize I2C bus with custom pins
-    print(f"Initializing I2C bus...")
-    try:
-        i2c = busio.I2C(scl_pin, sda_pin)
-    except Exception as e:
-        print(f"Error initializing I2C bus: {e}", file=sys.stderr)
-        print("Please check:", file=sys.stderr)
-        print("  - I2C is enabled on your system", file=sys.stderr)
-        print("  - Pin names are correct for your board", file=sys.stderr)
-        print("  - Display is properly connected", file=sys.stderr)
+        print(f"Please install: pip3 install adafruit-circuitpython-{DRIVER_NAME}", file=sys.stderr)
         sys.exit(1)
     
     # Initialize the display
     print(f"Initializing {DRIVER_NAME.upper()} display...")
     try:
         driver_class_name = f"{DRIVER_NAME.upper()}_I2C"
-        # Check if the driver class exists
         if not hasattr(driver_module, driver_class_name):
             print(f"Error: Driver class '{driver_class_name}' not found in module", file=sys.stderr)
             print(f"Available classes in module: {[attr for attr in dir(driver_module) if not attr.startswith('_')]}", file=sys.stderr)
@@ -151,8 +159,10 @@ def init_display():
         print(f"Error initializing display: {e}", file=sys.stderr)
         print("Please check:", file=sys.stderr)
         print(f"  - Display is connected to I2C address 0x{I2C_ADDRESS:02X}", file=sys.stderr)
-        print("  - I2C pins are correct", file=sys.stderr)
+        print("  - CP2112 device is working correctly", file=sys.stderr)
         print("  - Display is powered on", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     
     print(f"✓ Display initialized successfully")
