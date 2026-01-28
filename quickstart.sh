@@ -152,17 +152,6 @@ echo ""
 read -p "Install OLED display support? [y/N]: " install_oled
 
 if [[ "$install_oled" =~ ^[Yy]$ ]]; then
-    # Install I2C tools
-    print_info "Installing I2C tools..."
-    if [ "$PKG_MANAGER" = "apt-get" ]; then
-        eval $PKG_INSTALL i2c-tools python3-dev
-    elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
-        eval $PKG_INSTALL i2c-tools python3-devel
-    elif [ "$PKG_MANAGER" = "pacman" ]; then
-        eval $PKG_INSTALL i2c-tools
-    fi
-    print_success "I2C tools installed"
-    
     # Ask for driver type
     echo ""
     echo "Select your OLED display driver:"
@@ -188,11 +177,31 @@ if [[ "$install_oled" =~ ^[Yy]$ ]]; then
     read -p "I2C address (default: 0x3C): " i2c_addr
     [ -z "$i2c_addr" ] && i2c_addr="0x3C"
     
+    # Ask about TCA9548A multiplexer
+    echo ""
+    echo "Do you want to use a TCA9548A I2C multiplexer?"
+    echo "This is optional and only needed if you have multiple I2C devices."
+    read -p "Use TCA9548A multiplexer? [y/N]: " use_mux
+    
+    if [[ "$use_mux" =~ ^[Yy]$ ]]; then
+        USE_MULTIPLEXER="true"
+        
+        read -p "TCA9548A I2C address (default: 0x70): " mux_addr
+        [ -z "$mux_addr" ] && mux_addr="0x70"
+        
+        read -p "TCA9548A channel (0-7, default: 0): " mux_channel
+        [ -z "$mux_channel" ] && mux_channel="0"
+    else
+        USE_MULTIPLEXER="false"
+        mux_addr="0x70"
+        mux_channel="0"
+    fi
+    
     # Install Python dependencies
     print_info "Installing Python dependencies for OLED display..."
     
-    # Install base dependencies
-    pip3 install --user adafruit-blinka Pillow
+    # Install CP2112 and base dependencies
+    pip3 install --user cp2112 Pillow
     
     # Install driver-specific libraries
     if [ "$OLED_DRIVER" = "all" ]; then
@@ -206,36 +215,44 @@ if [[ "$install_oled" =~ ^[Yy]$ ]]; then
         pip3 install --user adafruit-circuitpython-$OLED_DRIVER
     fi
     
+    # Install TCA9548A library if needed
+    if [[ "$use_mux" =~ ^[Yy]$ ]]; then
+        print_info "Installing TCA9548A multiplexer library..."
+        pip3 install --user adafruit-circuitpython-tca9548a
+    fi
+    
     print_success "Python dependencies installed"
     
-    # Check for I2C devices
-    print_info "Checking for I2C devices..."
-    if [ -e "/dev/i2c-0" ] || [ -e "/dev/i2c-1" ]; then
-        print_success "I2C device nodes found"
+    # Check for CP2112 USB device
+    print_info "Checking for CP2112 USB-to-I2C bridge..."
+    if lsusb 2>/dev/null | grep -q "10c4:ea90"; then
+        print_success "CP2112 USB-to-I2C bridge detected"
         
-        # Try to detect the display
-        for bus in 0 1; do
-            if [ -e "/dev/i2c-$bus" ] && command -v i2cdetect &> /dev/null; then
-                echo ""
-                print_info "Scanning I2C bus $bus..."
-                if sudo i2cdetect -y $bus 2>/dev/null | grep -q "3c\|3d"; then
-                    print_success "OLED display detected on bus $bus"
-                fi
-            fi
-        done
-    else
-        print_warning "No I2C device nodes found"
-        print_info "You may need to enable I2C in your system configuration"
+        # Set up udev rules for non-root access
+        print_info "Setting up udev rules for CP2112 device access..."
+        sudo tee /etc/udev/rules.d/99-cp2112.rules > /dev/null << 'UDEV_EOF'
+# CP2112 HID USB-to-SMBus Bridge
+# Add user to plugdev group for access: sudo usermod -a -G plugdev $USER
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea90", GROUP="plugdev", MODE="0660"
+UDEV_EOF
         
-        # Platform-specific I2C instructions
-        if [ -f "/boot/orangepiEnv.txt" ]; then
-            print_info "For Orange Pi, enable I2C using:"
-            print_info "  sudo armbian-config -> System -> Hardware -> enable i2c0 or i2c1"
-            print_info "  OR edit /boot/orangepiEnv.txt and add: overlays=i2c0"
-        elif [ -f "/boot/config.txt" ]; then
-            print_info "For Raspberry Pi, enable I2C using:"
-            print_info "  sudo raspi-config -> Interface Options -> I2C -> Enable"
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger
+        
+        # Add user to plugdev group
+        if ! groups $USER | grep -q plugdev; then
+            print_info "Adding $USER to plugdev group..."
+            sudo usermod -a -G plugdev $USER
+            print_warning "You will need to log out and back in for group membership to take effect"
         fi
+        
+        print_success "udev rules configured"
+    else
+        print_warning "CP2112 USB-to-I2C bridge not detected"
+        print_info "Please ensure:"
+        print_info "  - CP2112 device is connected via USB"
+        print_info "  - The device is properly recognized by the system"
+        print_info "You can check with: lsusb | grep '10c4:ea90'"
     fi
     
     ENABLE_OLED=true
@@ -267,18 +284,24 @@ print_success "x11stream service installed"
 
 # Install OLED display if enabled
 if [ "$ENABLE_OLED" = true ]; then
-    print_info "Installing OLED display script..."
+    print_info "Installing OLED display scripts..."
     sudo cp oled_display.py /usr/local/bin/
+    sudo cp cp2112_i2c_bus.py /usr/local/bin/
     sudo chmod +x /usr/local/bin/oled_display.py
-    print_success "oled_display.py installed"
+    sudo chmod +x /usr/local/bin/cp2112_i2c_bus.py
+    print_success "OLED display scripts installed"
     
-    # Create environment file for OLED service with driver and address
+    # Create environment file for OLED service with driver, address, and multiplexer settings
     print_info "Configuring OLED display service..."
     sudo mkdir -p /etc/default
     sudo bash -c "cat > /etc/default/oled_display << 'EOF'
 # OLED Display Configuration
 OLED_DRIVER=$OLED_DRIVER
 I2C_ADDRESS=$i2c_addr
+# TCA9548A Multiplexer Configuration
+USE_MULTIPLEXER=$USE_MULTIPLEXER
+MULTIPLEXER_ADDRESS=$mux_addr
+MULTIPLEXER_CHANNEL=$mux_channel
 EOF"
     
     # Copy and update service file to use environment file

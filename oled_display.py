@@ -11,7 +11,6 @@ Works on any system with USB support (Linux, Orange Pi, Raspberry Pi, etc.)
 import time
 import sys
 import subprocess
-import glob
 import os
 
 # Import CP2112 library for USB-to-I2C communication
@@ -27,7 +26,7 @@ try:
     from cp2112_i2c_bus import CP2112I2CBus
 except ImportError as e:
     print(f"Error: CP2112 I2C bus wrapper not available: {e}", file=sys.stderr)
-    print("Please ensure cp2112_i2c_bus.py is in the same directory", file=sys.stderr)
+    print("Please ensure cp2112_i2c_bus.py is installed in the same directory or on the Python path", file=sys.stderr)
     sys.exit(1)
 
 from PIL import Image, ImageDraw, ImageFont

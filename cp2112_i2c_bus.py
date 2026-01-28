@@ -20,27 +20,112 @@ class CP2112I2CBus:
         """
         self.device = cp2112_device
     
-    def writeto(self, address, buffer, **kwargs):
+    def writeto(self, address, buffer, *, start=0, end=None, stop=True):
         """Write data to I2C device.
         
-        Args:
-            address: I2C device address (7-bit)
-            buffer: Bytes or bytearray to write
-            **kwargs: Additional arguments (ignored for CP2112)
-        """
-        self.device.write(address, bytes(buffer))
-    
-    def readfrom_into(self, address, buffer, **kwargs):
-        """Read data from I2C device into buffer.
+        This method is intended to be compatible with the CircuitPython
+        ``busio.I2C.writeto`` API. The CP2112 always generates a stop
+        condition at the end of a transfer and does not support repeated
+        starts, so the ``stop`` argument is accepted for compatibility but
+        is otherwise ignored.
         
         Args:
             address: I2C device address (7-bit)
-            buffer: Buffer to read data into
-            **kwargs: Additional arguments (ignored for CP2112)
+            buffer: Bytes-like object containing data to write.
+            start (int, optional): Start index within ``buffer`` to write
+                from. Defaults to 0.
+            end (int or None, optional): One-past-end index within
+                ``buffer`` to stop writing at. If None, writes through the
+                end of ``buffer``. Defaults to None.
+            stop (bool, optional): Whether to generate a stop bit at the
+                end of the transfer. Accepted for API compatibility but
+                ignored because CP2112 always sends a stop. Defaults to True.
         """
-        data = self.device.read(address, len(buffer))
+        if end is None:
+            end = len(buffer)
+        # Use a memoryview to avoid copying when slicing, then convert to
+        # bytes for the underlying CP2112 device API.
+        view = memoryview(buffer)[start:end]
+        self.device.write(address, bytes(view))
+    
+    def readfrom_into(self, address, buffer, *, start=0, end=None):
+        """Read data from I2C device into buffer.
+        
+        This method is intended to be compatible with the CircuitPython
+        ``busio.I2C.readfrom_into`` API.
+        
+        Args:
+            address: I2C device address (7-bit)
+            buffer: Writable buffer to read data into.
+            start (int, optional): Start index within ``buffer`` where
+                received data should be stored. Defaults to 0.
+            end (int or None, optional): One-past-end index within
+                ``buffer`` where data storage should stop. If None, reads
+                through the end of ``buffer``. Defaults to None.
+        """
+        if end is None:
+            end = len(buffer)
+        length = end - start
+        if length <= 0:
+            return
+        data = self.device.read(address, length)
         for i, byte in enumerate(data):
-            buffer[i] = byte
+            buffer[start + i] = byte
+    
+    def writeto_then_readfrom(
+        self,
+        address,
+        buffer_out,
+        buffer_in,
+        *,
+        out_start=0,
+        out_end=None,
+        in_start=0,
+        in_end=None,
+        stop=False,
+    ):
+        """Write to an address and then read from the same address.
+        
+        This method is intended to be compatible with the CircuitPython
+        ``busio.I2C.writeto_then_readfrom`` API. The CP2112 does not support
+        a true repeated-start condition, so this implementation performs a
+        write operation followed by a separate read operation, each with
+        their own stop condition. The ``stop`` parameter is accepted for
+        compatibility but is otherwise ignored.
+        
+        Args:
+            address: I2C device address (7-bit).
+            buffer_out: Bytes-like object containing data to write.
+            buffer_in: Writable buffer to receive the data read back.
+            out_start (int, optional): Start index within ``buffer_out`` to
+                write from. Defaults to 0.
+            out_end (int or None, optional): One-past-end index within
+                ``buffer_out`` to stop writing at. If None, writes through
+                the end of ``buffer_out``. Defaults to None.
+            in_start (int, optional): Start index within ``buffer_in`` where
+                received data should be stored. Defaults to 0.
+            in_end (int or None, optional): One-past-end index within
+                ``buffer_in`` where data storage should stop. If None, reads
+                through the end of ``buffer_in``. Defaults to None.
+            stop (bool, optional): Accepted for API compatibility but
+                ignored; CP2112 always sends a stop between write and read.
+        """
+        # Handle output slice
+        if out_end is None:
+            out_end = len(buffer_out)
+        out_view = memoryview(buffer_out)[out_start:out_end]
+        if len(out_view):
+            self.device.write(address, bytes(out_view))
+
+        # Handle input slice
+        if in_end is None:
+            in_end = len(buffer_in)
+        in_length = in_end - in_start
+        if in_length <= 0:
+            return
+        data = self.device.read(address, in_length)
+        for i, byte in enumerate(data):
+            buffer_in[in_start + i] = byte
     
     def try_lock(self):
         """Try to lock the bus.

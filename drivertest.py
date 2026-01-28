@@ -72,7 +72,7 @@ def init_display():
         from cp2112_i2c_bus import CP2112I2CBus
     except ImportError as e:
         print(f"Error: CP2112 I2C bus wrapper not available: {e}", file=sys.stderr)
-        print("Please ensure cp2112_i2c_bus.py is in the same directory", file=sys.stderr)
+        print("Please ensure cp2112_i2c_bus.py is in the same directory or on the Python path", file=sys.stderr)
         sys.exit(1)
     
     # Find and open CP2112 device

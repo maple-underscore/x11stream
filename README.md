@@ -264,10 +264,12 @@ EOF'
 
 Available drivers: `sh1106` (default), `ssd1306`, `ssd1305`, `ssd1309`
 
-5. **Install OLED display script**:
+5. **Install OLED display scripts**:
 ```bash
 sudo cp oled_display.py /usr/local/bin/
+sudo cp cp2112_i2c_bus.py /usr/local/bin/
 sudo chmod +x /usr/local/bin/oled_display.py
+sudo chmod +x /usr/local/bin/cp2112_i2c_bus.py
 ```
 
 6. **Install and enable the OLED display service**:
